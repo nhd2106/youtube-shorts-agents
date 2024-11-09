@@ -1,0 +1,10 @@
+flask==3.0.0
+flask-cors==4.0.0
+python-dotenv==1.0.0
+moviepy==1.0.3
+openai==1.12.0
+Pillow==10.2.0
+numpy==1.26.4
+together==0.2.11
+proglog==0.1.10
+SpeechRecognition==3.10.1

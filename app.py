@@ -18,17 +18,46 @@ content_generator = ContentGenerator()
 audio_generator = AudioGenerator()
 video_generator = VideoGenerator()
 
+@app.route('/api/models', methods=['GET'])
+def get_available_models() -> tuple[Any, int]:
+    """Get available TTS models and voices"""
+    try:
+        models = audio_generator.get_available_models()
+        return jsonify(models), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/generate', methods=['POST'])
 def generate() -> tuple[Any, int]:
     try:
         data: Dict[str, Any] = request.get_json()
         idea: str = data.get('idea', '')
+        video_format: str = data.get('format', 'shorts')  # 'shorts' or 'normal'
+        tts_model: str = data.get('tts_model', 'edge')    # TTS model selection
+        voice: str = data.get('voice', None)              # Voice selection
         
         if not idea:
             return jsonify({'error': 'Video idea is required'}), 400
 
-        # Run the generation process
-        result = asyncio.run(generate_content_video(idea))
+        # Validate video format
+        if video_format not in ['shorts', 'normal']:
+            return jsonify({'error': 'Invalid video format'}), 400
+
+        # Validate TTS model and voice
+        available_models = audio_generator.get_available_models()
+        if tts_model not in available_models:
+            return jsonify({'error': 'Invalid TTS model'}), 400
+
+        if voice and voice not in available_models[tts_model]['voices']:
+            return jsonify({'error': 'Invalid voice for selected model'}), 400
+
+        # Run the generation process with parameters
+        result = asyncio.run(generate_content_video(
+            idea=idea,
+            video_format=video_format,
+            tts_model=tts_model,
+            voice=voice
+        ))
         
         return jsonify(result), 200
 
@@ -41,6 +70,8 @@ def download_file(filename: str) -> Any:
         # Determine file type and set appropriate directory
         if filename.endswith('.mp4'):
             directory = 'contents/video'
+        elif filename.endswith('.jpg') or filename.endswith('.jpeg'):
+            directory = 'contents/thumbnail'
         elif filename.endswith('.txt'):
             directory = 'contents/script'
         else:
@@ -60,30 +91,48 @@ def download_file(filename: str) -> Any:
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-async def generate_content_video(idea: str) -> Dict[str, Any]:
-    """Generate content and video based on idea"""
+async def generate_content_video(
+    idea: str,
+    video_format: str = 'shorts',
+    tts_model: str = 'edge',
+    voice: str = None
+) -> Dict[str, Any]:
+    """Generate content and video based on idea and parameters"""
     try:
-        # Generate content
-        content = await content_generator.generate_content(idea)
+        # Generate content with format
+        content = await content_generator.generate_content(idea, video_format)
         
-        # Generate audio
+        # Generate audio with selected model and voice
         filename = f"audio_{int(time.time())}"
         audio_path = await audio_generator.generate_audio(
             script=content['script'],
             filename=filename,
-            model="openai"
+            model=tts_model,
+            voice=voice
         )
         
         # Generate video
-        video_filename = f"youtube_shorts_{int(time.time())}"
-        video_path = await video_generator.generate_video(
+        video_filename = f"video_{video_format}_{int(time.time())}"
+        video_result = await video_generator.generate_video(
             audio_path=audio_path,
             content=content,
             filename=video_filename
         )
         
-        # Save content to file
-        content_file = save_content_to_file(content, video_path, audio_path)
+        if not video_result:
+            raise Exception("Video generation failed")
+
+        video_path = video_result['video_path']
+        thumbnail_path = video_result['thumbnail_path']
+        
+        # Save content to file with additional metadata
+        content_file = save_content_to_file(
+            content=content,
+            video_path=video_path,
+            audio_path=audio_path,
+            tts_model=tts_model,
+            voice=voice
+        )
         
         # Return paths for downloading
         return {
@@ -91,9 +140,18 @@ async def generate_content_video(idea: str) -> Dict[str, Any]:
                 'filename': os.path.basename(video_path),
                 'url': f'/api/download/{os.path.basename(video_path)}'
             },
+            'thumbnail': {
+                'filename': os.path.basename(thumbnail_path) if thumbnail_path else None,
+                'url': f'/api/download/{os.path.basename(thumbnail_path)}' if thumbnail_path else None
+            },
             'content': {
                 'filename': os.path.basename(content_file),
                 'url': f'/api/download/{os.path.basename(content_file)}'
+            },
+            'metadata': {
+                'format': video_format,
+                'tts_model': tts_model,
+                'voice': voice
             }
         }
 
@@ -103,9 +161,11 @@ async def generate_content_video(idea: str) -> Dict[str, Any]:
 def save_content_to_file(
     content: Dict[str, Any],
     video_path: str,
-    audio_path: str
+    audio_path: str,
+    tts_model: str,
+    voice: str = None
 ) -> str:
-    """Save generated content to a text file"""
+    """Save generated content to a text file with additional metadata"""
     save_dir = os.path.join("contents", "script")
     os.makedirs(save_dir, exist_ok=True)
     
@@ -114,10 +174,13 @@ def save_content_to_file(
     filepath = os.path.join(save_dir, filename)
     
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write("=== YouTube Shorts Content ===\n\n")
+        f.write("=== YouTube Content ===\n\n")
         f.write(f"Title: {content['title']}\n\n")
         f.write(f"Script:\n{content['script']}\n\n")
         f.write(f"Hashtags:\n{' '.join(f'#{tag}' for tag in content['hashtags'])}\n\n")
+        f.write(f"Format: {content.get('format', {}).get('type', 'shorts')}\n")
+        f.write(f"TTS Model: {tts_model}\n")
+        f.write(f"Voice: {voice or 'default'}\n\n")
         f.write(f"Generated Files:\n")
         f.write(f"Audio: {audio_path}\n")
         f.write(f"Video: {video_path}\n")

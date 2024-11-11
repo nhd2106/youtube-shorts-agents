@@ -8,3 +8,4 @@ numpy==1.26.4
 together==0.2.11
 proglog==0.1.10
 SpeechRecognition==3.10.1
+requests==2.31.0

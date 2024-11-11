@@ -16,16 +16,16 @@ import sys
 
 console = Console()
 
-async def generate_content(generator: ContentGenerator, idea: str) -> dict:
+async def generate_content(generator: ContentGenerator, idea: str, video_format: str) -> dict:
     """Generate content based on user input"""
     try:
-        content = await generator.generate_content(idea)
+        content = await generator.generate_content(idea, video_format)
         return content
     except Exception as e:
         console.print(f"[red]Error generating content: {str(e)}[/red]")
         raise
 
-async def generate_audio(audio_generator: AudioGenerator, script: str) -> str:
+async def generate_audio(audio_generator: AudioGenerator, script: str, model: str, voice: str) -> str:
     """Generate audio from script"""
     try:
         console.print("[yellow]Starting audio generation process...[/yellow]")
@@ -35,12 +35,8 @@ async def generate_audio(audio_generator: AudioGenerator, script: str) -> str:
         console.print(f"[dim]Debug: Script length: {len(script)} characters[/dim]")
         console.print(f"[dim]Debug: First 100 chars of script: {script[:100]}...[/dim]")
         
-        # Simplified model selection - remove user prompt for testing
-        model = "openai"  # Force edge TTS for testing
         console.print(f"[dim]Debug: Using model: {model}[/dim]")
         
-        # Use a specific voice without fetching list
-        voice = None  # Changed to a common English voice
         console.print(f"[dim]Debug: Using voice: {voice}[/dim]")
         
         console.print("[yellow]Starting audio generation...[/yellow]")
@@ -195,7 +191,7 @@ def display_results(content: dict) -> None:
         border_style="green"
     ))
 
-def save_content_to_file(content: dict, video_path: str, audio_path: str) -> str:
+def save_content_to_file(content: dict, video_path: str, audio_path: str, audio_generator: AudioGenerator) -> str:
     """Save generated content to a text file in src/contents/script directory"""
     # Create directory if it doesn't exist
     save_dir = os.path.join("contents", "script")
@@ -204,6 +200,7 @@ def save_content_to_file(content: dict, video_path: str, audio_path: str) -> str
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"content_{timestamp}.txt"
     filepath = os.path.join(save_dir, filename)
+    
     
     with open(filepath, "w", encoding="utf-8") as f:
         f.write("=== YouTube Shorts Content ===\n\n")
@@ -230,9 +227,33 @@ async def main():
         audio_generator = AudioGenerator()
         video_generator = VideoGenerator()
         
-        # Get user input
-        idea = Prompt.ask("[cyan]💡 Enter your video idea[/cyan]")
+        # Get video format preference
+        video_format = Prompt.ask(
+            "[cyan]Select video format[/cyan]",
+            choices=["shorts", "normal"],
+            default="shorts"
+        )
+
+        # Get TTS model preference
+        available_models = audio_generator.get_available_models()
         
+        model = Prompt.ask(
+            "[cyan]Select TTS model[/cyan]",
+            choices=list(available_models.keys()),
+            default="edge"
+        )
+
+        # Get voice preference for selected model
+        voices = available_models[model]["voices"]
+        voice = Prompt.ask(
+            "[cyan]Select voice[/cyan]",
+            choices=voices,
+            default=available_models[model]["default_voice"]
+        )
+
+        # Get user input for content
+        idea = Prompt.ask("[cyan]💡 Enter your video idea[/cyan]")
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -240,22 +261,23 @@ async def main():
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeRemainingColumn(),
         ) as progress:
-            # Content generation
-            content_task = progress.add_task("[yellow]Generating content...", total=100)
-            content = await generate_content(content_generator, idea)
-            progress.update(content_task, completed=100)
+            # Generate content with format
+            content = await generate_content(content_generator, idea, video_format)
             
-            # Audio generation
-            audio_task = progress.add_task("[blue]Generating audio...", total=100)
-            audio_path = await generate_audio(audio_generator, content['script'])
-            progress.update(audio_task, completed=100)
+            # Generate audio with selected model and voice
+            audio_path = await generate_audio(
+                audio_generator, 
+                content['script'],
+                model=model,
+                voice=voice
+            )
             
             # Video generation
             video_path = await generate_video(video_generator, audio_path, content, progress)
 
         # Display results including paths
         display_results(content)
-        content_file = save_content_to_file(content, video_path, audio_path)
+        content_file = save_content_to_file(content, video_path, audio_path, audio_generator)
         console.print(Panel(
             f"🎵 Audio saved to: {audio_path}\n"
             f"🎥 Video saved to: {video_path}\n"

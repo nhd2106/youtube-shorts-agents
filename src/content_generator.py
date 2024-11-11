@@ -3,19 +3,45 @@ import os
 from openai import AsyncOpenAI
 from typing import Optional
 
+class VideoFormat(TypedDict):
+    type: str  # 'shorts' or 'normal'
+    duration: str  # '60s' for shorts, 'flexible' for normal
+
 class Content(TypedDict):
     script: str
     title: str
     hashtags: list[str]
+    format: VideoFormat
 
 class ContentGenerator:
     def __init__(self):
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    async def generate_content(self, idea: str) -> Content:
+    async def generate_content(self, idea: str, video_format: str = "shorts") -> Content:
         try:
-            # Create system prompt to define the format
-            system_prompt = """You are a Vietnamese content creator specialized in creating YouTube Shorts scripts.
+            # Define format specifications
+            format_specs = {
+                "shorts": {
+                    "type": "shorts",
+                    "duration": "60s",
+                    "script_length": "60 - 75 seconds",
+                    "style": "energetic and engaging"
+                },
+                "normal": {
+                    "type": "normal",
+                    "duration": "flexible",
+                    "script_length": "2-10 minutes",
+                    "style": "detailed and comprehensive"
+                }
+            }
+
+            if video_format not in format_specs:
+                raise ValueError(f"Invalid video format. Choose from: {list(format_specs.keys())}")
+
+            format_spec = format_specs[video_format]
+
+            # Update system prompt based on video format
+            system_prompt = f"""You are a Vietnamese content creator specialized in creating {video_format} videos.
             You must always respond in the exact format:
             TITLE: [catchy Vietnamese title]
             SCRIPT: [Vietnamese script]
@@ -24,22 +50,30 @@ class ContentGenerator:
             Follow these guidelines:
             1. Title should be catchy and in Vietnamese
             2. Script must: 
+                - Start with an irresistible hook in the first 3 seconds using ONE of these:
+                    * Mind-blowing statistic that challenges common beliefs
+                    * Controversial "hot take" that makes viewers stop scrolling
+                    * "What if I told you..." followed by an unexpected revelation
+                    * Personal story that hits emotional pain points
+                    * Direct challenge to viewer: "You've been doing X wrong all along"
+                    * Time-sensitive urgency: "In the next 60 seconds..."
+                - In case user ask about history, you should answer with time and place if possible
+                - In case user ask for a story, you should answer with meaningful story dont stop too fast  
+                - In case user ask for facts, you should answer in 7-10 facts about the topic
                 - Be in Vietnamese
-                - Start with "Xin chào các bạn!"
-                - Be 45-60 seconds when read
-                - Should be browsing the internet to find the most interesting and relevant information
-                - Also browsing to get correct information
-                - End with "Các bạn nghĩ sao về những điều này? Nếu thấy video này hay, đừng quên bấm like và đăng ký kênh nhé!"
-                - In case user give you the link, you should browse the link and get the most interesting and relevant information
-                - All numbers should be in text format
+                - Be {format_spec['script_length']} when read
+                - Be {format_spec['style']}
+                - Should be browsing the internet for accurate information
+                - Structure: Attention-grabbing hook → Problem → Solution → Call to action
+                - End with "Các bạn nghĩ sao về những điều này? Nếu thấy video này hữu ích, đừng ngại bấm like và đăng ký để ủng hộ kênh!"
             3. Hashtags should be relevant, mix of Vietnamese and English"""
-            
+
             # Make the API call
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",  # or "gpt-3.5-turbo" for lower cost
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Create a YouTube Short script about: {idea}"}
+                    {"role": "user", "content": f"Create a {video_format} video script about: {idea}"}
                 ],
                 temperature=0.7,
                 
@@ -51,13 +85,13 @@ class ContentGenerator:
             print(content)
             
             # Parse and return the content
-            return self._parse_content(content)
+            return self._parse_content(content, format_spec)
             
         except Exception as e:
             print(f"\nDebug - Error details: {str(e)}")
             raise
 
-    def _parse_content(self, content: str) -> Content:
+    def _parse_content(self, content: str, format_spec: dict) -> Content:
         """Helper method to parse the assistant's response"""
         title = ""
         script = ""
@@ -96,5 +130,9 @@ class ContentGenerator:
         return {
             "title": title,
             "script": script,
-            "hashtags": hashtags
+            "hashtags": hashtags,
+            "format": {
+                "type": format_spec["type"],
+                "duration": format_spec["duration"]
+            }
         }

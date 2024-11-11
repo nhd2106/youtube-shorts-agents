@@ -1,7 +1,7 @@
 from moviepy.editor import AudioFileClip, TextClip, CompositeVideoClip, ImageClip, ColorClip, vfx
 from moviepy.config import change_settings
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
 import re
 import speech_recognition as sr
@@ -30,10 +30,26 @@ class MyBarLogger(ProgressBarLogger):
 
 class VideoGenerator:
     def __init__(self):
+        # Define video format specifications
+        self.VIDEO_FORMATS = {
+            "shorts": {
+                "width": 1080,
+                "height": 1920,
+                "aspect_ratio": "9:16"
+            },
+            "normal": {
+                "width": 1920,
+                "height": 1080,
+                "aspect_ratio": "16:9"
+            }
+        }
+        
         self.OUTPUT_DIR = Path("contents/video")
-        self.WIDTH = 1080
-        self.HEIGHT = 1920
+        # Default to shorts format
+        self.WIDTH = self.VIDEO_FORMATS["shorts"]["width"]
+        self.HEIGHT = self.VIDEO_FORMATS["shorts"]["height"]
         self.DURATION = None
+        self.current_format = "shorts"
         
         # Set ImageMagick binary path for MoviePy
         if os.path.exists('/opt/homebrew/bin/convert'):
@@ -66,11 +82,13 @@ class VideoGenerator:
 
     def create_text_clip(self, text: str, start_time: float, duration: float) -> TextClip:
         """Create an animated text clip with enhanced effects"""
-        # Create main text clip with improved styling
+        # Adjust text size based on video format
+        fontsize = 60 if self.current_format == "shorts" else 48
+        
         text_clip = TextClip(
             text,
             font='Arial-Bold',
-            fontsize=60,
+            fontsize=fontsize,
             color='yellow',
             size=(self.WIDTH - 100, None),
             method='caption',
@@ -253,6 +271,17 @@ class VideoGenerator:
         """Generate background images with rate limiting"""
         background_images = {}
         
+        # Calculate dimensions based on format
+        width_steps = 64  # Base step size
+        height_steps = 64
+        
+        if self.current_format == "shorts":
+            width = 9 * width_steps   # 576 pixels (9:16 ratio)
+            height = 16 * height_steps # 1024 pixels
+        else:
+            width = 16 * width_steps  # 1024 pixels (16:9 ratio)
+            height = 9 * height_steps  # 576 pixels
+
         for i, prompt in enumerate(prompts):
             if prompt in self.image_cache:
                 background_images[i] = self.image_cache[prompt]
@@ -265,12 +294,12 @@ class VideoGenerator:
                 await asyncio.sleep(self.RATE_LIMIT_DELAY - time_since_last_request)
 
             try:
-                print(f"Generating image {i + 1}/{len(prompts)} with prompt: {prompt[:100]}...")  # Debug log
+                print(f"Generating {self.current_format} format image {i + 1}/{len(prompts)}")
                 response = self.together_client.images.generate(
                     prompt=prompt,
                     model="black-forest-labs/FLUX.1-schnell-Free",
-                    width=9 * 64,
-                    height=16 * 64,
+                    width=width,
+                    height=height,
                     steps=4,
                     n=1,
                     response_format="b64_json"
@@ -297,11 +326,13 @@ class VideoGenerator:
 
     def create_title_clip(self, text: str, duration: float) -> TextClip:
         """Create an enhanced title clip with dynamic effects"""
-        # Create main title with improved styling
+        # Adjust title size based on video format
+        fontsize = 90 if self.current_format == "shorts" else 72
+        
         text_clip = TextClip(
             text,
             font='Arial-Bold',
-            fontsize=90,
+            fontsize=fontsize,
             color='yellow',
             size=(self.WIDTH - 100, None),
             method='caption',
@@ -358,9 +389,17 @@ class VideoGenerator:
         content: dict, 
         filename: str, 
         progress_callback: callable = None
-    ) -> str:
-        """Generate video with progress updates"""
+    ) -> Dict[str, Any]:
+        """Generate video with progress updates and return thumbnail"""
         try:
+            # Update dimensions based on content format
+            video_format = content.get('format', {}).get('type', 'shorts')
+            if video_format in self.VIDEO_FORMATS:
+                self.WIDTH = self.VIDEO_FORMATS[video_format]["width"]
+                self.HEIGHT = self.VIDEO_FORMATS[video_format]["height"]
+                self.current_format = video_format
+                print(f"Debug: Using {video_format} format ({self.WIDTH}x{self.HEIGHT})")
+            
             # Add debug logging for input validation
             print(f"Debug: Starting generate_video with filename: {filename}")
             print(f"Debug: Audio path exists: {os.path.exists(audio_path)}")
@@ -371,14 +410,16 @@ class VideoGenerator:
             video_path = self.OUTPUT_DIR / f"{filename}.mp4"
             print(f"Debug: Video will be saved to: {video_path}")
             
+            # Adjust for 1.25x audio speed
+            SPEED_FACTOR = 1.25
+            
             # Load audio and get duration
-            if not os.path.exists(audio_path):
-                raise FileNotFoundError(f"Audio file not found at {audio_path}")
-                
             print("Loading audio file...")
             audio = AudioFileClip(audio_path)
-            self.DURATION = audio.duration
-            print(f"Debug: Audio duration: {self.DURATION}")
+            self.DURATION = audio.duration  # This is the accelerated duration
+            self.ORIGINAL_DURATION = self.DURATION * SPEED_FACTOR  # Calculate original duration
+            print(f"Debug: Audio duration (accelerated): {self.DURATION}")
+            print(f"Debug: Original duration: {self.ORIGINAL_DURATION}")
             
             if progress_callback:
                 progress_callback('compose', 0)
@@ -397,12 +438,19 @@ class VideoGenerator:
             background_images = await self.generate_background_images(prompts)
             if not background_images:
                 raise ValueError("Failed to generate any background images")
-            
+
+            # Save the first image as thumbnail
+            thumbnail_path = None
+            if 0 in background_images:
+                thumbnail_filename = f"{filename}_thumb.jpg"
+                thumbnail_path = Path('contents/thumbnail') / thumbnail_filename
+                Image.fromarray(background_images[0]).save(str(thumbnail_path))
+
             # Create background clips
             print("Creating background clips...")  # Debug log
-            segment_duration = self.DURATION / max(len(prompts), 1)
+            segment_duration = self.DURATION / max(len(prompts), 1)  # Using accelerated duration
             background_clips = []
-            transition_duration = 1.0  # 1 second transition
+            transition_duration = 0.8  # Reduced from 1.0 to match faster pace
             
             for i, image_array in background_images.items():
                 if image_array is None:
@@ -412,16 +460,14 @@ class VideoGenerator:
                 start_time = i * segment_duration
                 bg_clip = ImageClip(image_array)
                 
-                # Set initial duration before applying effects
-                if i < len(background_images) - 1:  # Not the last clip
+                if i < len(background_images) - 1:
                     clip_duration = segment_duration + transition_duration
-                else:  # Last clip
+                else:
                     clip_duration = segment_duration
                 
                 bg_clip = bg_clip.set_duration(clip_duration)
                 
-                # Add crossfade transitions after setting duration
-                if i > 0:  # Not the first clip
+                if i > 0:
                     bg_clip = bg_clip.set_start(start_time - transition_duration)
                     bg_clip = bg_clip.crossfadein(transition_duration)
                 else:
@@ -444,23 +490,20 @@ class VideoGenerator:
             phrases = self.split_into_phrases(content['script'])
             text_clips = []
             
-            # Calculate total duration and adjust timing
             total_chars = sum(len(phrase) for phrase in phrases)
-            # Adjust these values to fine-tune the timing
-            base_duration = 0.25  # Base duration per character
-            min_duration = 1.5    # Minimum duration for very short phrases
+            # Adjust timing parameters for faster audio
+            base_duration = 0.2  # Reduced from 0.25
+            min_duration = 1.2   # Reduced from 1.5
             
             current_time = 0
-            remaining_duration = self.DURATION
+            remaining_duration = self.DURATION  # Using accelerated duration
             
             for i, phrase in enumerate(phrases):
-                # Calculate phrase duration based on character count
                 char_count = len(phrase)
                 if i == len(phrases) - 1:
-                    # Last phrase uses remaining duration
                     phrase_duration = remaining_duration
                 else:
-                    # Calculate proportional duration
+                    # Calculate duration proportionally to text length and speed
                     phrase_duration = max(
                         min_duration,
                         (char_count / total_chars) * self.DURATION
@@ -533,8 +576,11 @@ class VideoGenerator:
             if progress_callback:
                 progress_callback('export', 100)
 
-            return str(video_path)
-            
+            return {
+                'video_path': str(video_path),
+                'thumbnail_path': str(thumbnail_path) if thumbnail_path else None
+            }
+
         except Exception as e:
             print(f"Error in generate_video:")
             print(f"Error type: {type(e).__name__}")
@@ -570,17 +616,17 @@ class VideoGenerator:
             image_data = base64.b64decode(response.data[0].b64_json)
             image = Image.open(io.BytesIO(image_data))
             
-            # Resize using new Pillow syntax
+            # Resize to current format dimensions
             if image.size != (self.WIDTH, self.HEIGHT):
                 image = image.resize(
                     (self.WIDTH, self.HEIGHT),
-                    Image.Resampling.LANCZOS  # Use LANCZOS instead of ANTIALIAS
+                    Image.Resampling.LANCZOS
                 )
             
             return np.array(image)
         except Exception as e:
             print(f"Error processing image: {str(e)}")
-            # Return a default colored background
+            # Return a default colored background with correct dimensions
             return np.full((self.HEIGHT, self.WIDTH, 3), [25, 25, 25], dtype=np.uint8)
 
     def validate_dependencies(self) -> None:

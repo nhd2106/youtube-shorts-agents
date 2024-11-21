@@ -10,17 +10,29 @@ from src.content_generator import ContentGenerator
 from src.audio_generator import AudioGenerator
 from src.video_generator import VideoGenerator
 from src.image_handler import ImageHandler
+from src.request_tracker import RequestTracker, RequestStatus
 import time
 from datetime import datetime
+import threading
 
 app = Flask(__name__)
 CORS(app)
 
-# Initialize generators
+# Initialize generators and request tracker
 content_generator = ContentGenerator()
 audio_generator = AudioGenerator()
 video_generator = VideoGenerator()
 image_handler = ImageHandler()
+request_tracker = RequestTracker()
+
+# Start background task to clean old requests
+def clean_old_requests():
+    while True:
+        request_tracker.clean_old_requests()
+        time.sleep(3600)  # Clean every hour
+
+cleaning_thread = threading.Thread(target=clean_old_requests, daemon=True)
+cleaning_thread.start()
 
 @app.route('/api/models', methods=['GET'])
 def get_available_models() -> tuple[Any, int]:
@@ -32,13 +44,13 @@ def get_available_models() -> tuple[Any, int]:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate', methods=['POST'])
-def generate() -> tuple[Any, int]:
+async def generate() -> tuple[Any, int]:
     try:
         data: Dict[str, Any] = request.get_json()
         idea: str = data.get('idea', '')
-        video_format: str = data.get('format', 'shorts')  # 'shorts' or 'normal'
-        tts_model: str = data.get('tts_model', 'edge')    # TTS model selection
-        voice: str = data.get('voice', None)              # Voice selection
+        video_format: str = data.get('format', 'shorts')
+        tts_model: str = data.get('tts_model', 'edge')
+        voice: str = data.get('voice', None)
         
         if not idea:
             return jsonify({'error': 'Video idea is required'}), 400
@@ -55,16 +67,36 @@ def generate() -> tuple[Any, int]:
         if voice and voice not in available_models[tts_model]['voices']:
             return jsonify({'error': 'Invalid voice for selected model'}), 400
 
-        # Run the generation process with parameters
-        result = asyncio.run(generate_content_video(
+        # Create request and start generation in background
+        request_id = request_tracker.create_request()
+        
+        # Start async generation without waiting
+        asyncio.create_task(generate_content_video(
+            request_id=request_id,
             idea=idea,
             video_format=video_format,
             tts_model=tts_model,
             voice=voice
         ))
         
-        return jsonify(result), 200
+        # Return request ID immediately
+        return jsonify({
+            'request_id': request_id,
+            'status': 'pending',
+            'message': 'Generation started'
+        }), 202
 
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/status/<request_id>', methods=['GET'])
+def get_status(request_id: str) -> tuple[Any, int]:
+    """Get status of a generation request"""
+    try:
+        request_data = request_tracker.get_request(request_id)
+        if not request_data:
+            return jsonify({'error': 'Request not found'}), 404
+        return jsonify(request_data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -96,13 +128,21 @@ def download_file(filename: str) -> Any:
         return jsonify({'error': str(e)}), 500
 
 async def generate_content_video(
+    request_id: str,
     idea: str,
     video_format: str = 'shorts',
     tts_model: str = 'edge',
     voice: str = None
-) -> Dict[str, Any]:
+) -> None:
     """Generate content and video based on idea and parameters"""
     try:
+        # Update status to generating content
+        request_tracker.update_request(
+            request_id=request_id,
+            status=RequestStatus.GENERATING_CONTENT,
+            progress=10
+        )
+        
         # Generate content with format
         content = await content_generator.generate_content(idea, video_format)
         
@@ -110,12 +150,25 @@ async def generate_content_video(
         filename = f"audio_{int(time.time())}"
         video_filename = f"video_{video_format}_{int(time.time())}"
         
+        # Update status to generating audio and images
+        request_tracker.update_request(
+            request_id=request_id,
+            status=RequestStatus.GENERATING_AUDIO,
+            progress=30
+        )
+        
         # Create tasks for parallel execution
         audio_task = audio_generator.generate_audio(
             script=content['script'],
             filename=filename,
             model=tts_model,
             voice=voice
+        )
+        
+        request_tracker.update_request(
+            request_id=request_id,
+            status=RequestStatus.GENERATING_IMAGES,
+            progress=40
         )
         
         # Start generating images while audio is being generated
@@ -129,13 +182,23 @@ async def generate_content_video(
         if not os.path.exists(audio_path):
             raise Exception("Audio generation failed or file not found")
         
+        # Update status to generating video
+        request_tracker.update_request(
+            request_id=request_id,
+            status=RequestStatus.GENERATING_VIDEO,
+            progress=70
+        )
+        
         # Generate video with the prepared audio and images
         video_result = await video_generator.generate_video(
             audio_path=audio_path,
             content=content,
             filename=video_filename,
             background_images=image_paths,
-            progress_callback=None
+            progress_callback=lambda p: request_tracker.update_request(
+                request_id=request_id,
+                progress=70 + int(p * 0.3)  # Scale progress from 70 to 100
+            )
         )
         
         if not video_result:
@@ -153,8 +216,8 @@ async def generate_content_video(
             voice=voice
         )
         
-        # Return paths for downloading
-        return {
+        # Update request with final result
+        result = {
             'video': {
                 'filename': os.path.basename(video_path),
                 'url': f'/api/download/{os.path.basename(video_path)}'
@@ -173,9 +236,20 @@ async def generate_content_video(
                 'voice': voice
             }
         }
+        
+        request_tracker.update_request(
+            request_id=request_id,
+            status=RequestStatus.COMPLETED,
+            progress=100,
+            result=result
+        )
 
     except Exception as e:
-        raise Exception(f"Generation failed: {str(e)}")
+        request_tracker.update_request(
+            request_id=request_id,
+            status=RequestStatus.FAILED,
+            error=str(e)
+        )
 
 def save_content_to_file(
     content: Dict[str, Any],

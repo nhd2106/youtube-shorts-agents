@@ -1,12 +1,15 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import asyncio
 import os
 from typing import Dict, Any
-from dotenv import load_dotenv
 from src.content_generator import ContentGenerator
 from src.audio_generator import AudioGenerator
 from src.video_generator import VideoGenerator
+from src.image_handler import ImageHandler
 import time
 from datetime import datetime
 
@@ -17,6 +20,7 @@ CORS(app)
 content_generator = ContentGenerator()
 audio_generator = AudioGenerator()
 video_generator = VideoGenerator()
+image_handler = ImageHandler()
 
 @app.route('/api/models', methods=['GET'])
 def get_available_models() -> tuple[Any, int]:
@@ -102,21 +106,36 @@ async def generate_content_video(
         # Generate content with format
         content = await content_generator.generate_content(idea, video_format)
         
-        # Generate audio with selected model and voice
+        # Start audio generation and image generation in parallel
         filename = f"audio_{int(time.time())}"
-        audio_path = await audio_generator.generate_audio(
+        video_filename = f"video_{video_format}_{int(time.time())}"
+        
+        # Create tasks for parallel execution
+        audio_task = audio_generator.generate_audio(
             script=content['script'],
             filename=filename,
             model=tts_model,
             voice=voice
         )
         
-        # Generate video
-        video_filename = f"video_{video_format}_{int(time.time())}"
+        # Start generating images while audio is being generated
+        prompts = await video_generator.generate_prompts_with_openai(content['script'])
+        image_task = image_handler.generate_images(prompts)
+        
+        # Wait for both tasks to complete
+        audio_path, image_paths = await asyncio.gather(audio_task, image_task)
+        
+        # Verify audio file exists before proceeding
+        if not os.path.exists(audio_path):
+            raise Exception("Audio generation failed or file not found")
+        
+        # Generate video with the prepared audio and images
         video_result = await video_generator.generate_video(
             audio_path=audio_path,
             content=content,
-            filename=video_filename
+            filename=video_filename,
+            background_images=image_paths,
+            progress_callback=None
         )
         
         if not video_result:
@@ -188,5 +207,4 @@ def save_content_to_file(
     return filepath
 
 if __name__ == '__main__':
-    load_dotenv()
     app.run(debug=True)

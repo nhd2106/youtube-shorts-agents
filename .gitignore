@@ -6,3 +6,5 @@
 /src/_pycache_
 /src/__pycache__
 /venv
+
+.DS_Store

@@ -22,7 +22,7 @@ class AudioGenerator:
             "name": "OpenAI TTS",
             "default_voice": "echo",
             "voices": ["echo", "alloy", "fable", "onyx", "nova", "shimmer"]
-        }
+        },
     }
 
     def get_available_models(self) -> dict:
@@ -65,6 +65,15 @@ class AudioGenerator:
                     speed=1.25  # OpenAI TTS supports speed adjustment
                 )
                 response.stream_to_file(output_path)
+            elif model == "pyttsx3":
+                engine = pyttsx3.init()
+                # Set Vietnamese voice if available
+                for v in engine.getProperty('voices'):
+                    if 'vietnam' in v.languages:
+                        engine.setProperty('voice', v.id)
+                        break
+                engine.save_to_file(script, output_path)
+                engine.runAndWait()
             # elif model == "TTS":
             #     # Initialize TTS with a Vietnamese-compatible model
             #     tts = TTS(model_name="tts_models/vi/vivos/vits", progress_bar=False)

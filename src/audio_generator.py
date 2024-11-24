@@ -29,8 +29,24 @@ class AudioGenerator:
         """Return available TTS models and their voices"""
         return self.AVAILABLE_MODELS
 
-    async def generate_audio(self, script: str, filename: str, model: str = "edge", voice: str = None) -> str:
-        """Generate audio file from script"""
+    async def generate_audio(
+        self,
+        script: str,
+        filename: str,
+        model: str = "edge",
+        voice: str = None,
+        output_dir: str = None
+    ) -> str:
+        """
+        Generate audio file from script
+        
+        Args:
+            script: Text to convert to speech
+            filename: Output filename (without extension)
+            model: TTS model to use
+            voice: Voice to use
+            output_dir: Optional output directory (defaults to contents/audio)
+        """
         try:
             # Validate model and voice selection
             if model not in self.AVAILABLE_MODELS:
@@ -42,7 +58,9 @@ class AudioGenerator:
             if voice not in selected_model["voices"]:
                 raise ValueError(f"Invalid voice for {model}. Available voices: {selected_model['voices']}")
 
-            output_dir = "contents/audio"
+            # Use provided output directory or default
+            if not output_dir:
+                output_dir = "contents/audio"
             os.makedirs(output_dir, exist_ok=True)
             
             output_path = os.path.join(output_dir, f"{filename}.mp3")
@@ -65,15 +83,15 @@ class AudioGenerator:
                     speed=1.25  # OpenAI TTS supports speed adjustment
                 )
                 response.stream_to_file(output_path)
-            elif model == "pyttsx3":
-                engine = pyttsx3.init()
-                # Set Vietnamese voice if available
-                for v in engine.getProperty('voices'):
-                    if 'vietnam' in v.languages:
-                        engine.setProperty('voice', v.id)
-                        break
-                engine.save_to_file(script, output_path)
-                engine.runAndWait()
+            # elif model == "pyttsx3":
+            #     engine = pyttsx3.init()
+            #     # Set Vietnamese voice if available
+            #     for v in engine.getProperty('voices'):
+            #         if 'vietnam' in v.languages:
+            #             engine.setProperty('voice', v.id)
+            #             break
+            #     engine.save_to_file(script, output_path)
+            #     engine.runAndWait()
             # elif model == "TTS":
             #     # Initialize TTS with a Vietnamese-compatible model
             #     tts = TTS(model_name="tts_models/vi/vivos/vits", progress_bar=False)

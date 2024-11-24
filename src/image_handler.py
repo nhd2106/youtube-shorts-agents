@@ -27,16 +27,27 @@ class ImageHandler:
             }
         }
         
-        self.OUTPUT_DIR = Path("contents/images")
+        self.DEFAULT_OUTPUT_DIR = Path("contents/images")
         self.current_format = "shorts"
         self.WIDTH = self.VIDEO_FORMATS["shorts"]["width"]
         self.HEIGHT = self.VIDEO_FORMATS["shorts"]["height"]
-        
-        # Ensure output directory exists
-        os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
-    async def generate_image(self, prompt: str, index: int, length: int) -> str:
-        """Generate an image and save it to file"""
+    async def generate_image(
+        self,
+        prompt: str,
+        index: int,
+        length: int,
+        output_dir: str = None
+    ) -> str:
+        """
+        Generate an image and save it to file
+        
+        Args:
+            prompt: Image generation prompt
+            index: Image index
+            length: Total number of images
+            output_dir: Optional output directory (defaults to contents/images)
+        """
         try:
             # Rate limiting
             current_time = time.time()
@@ -80,8 +91,15 @@ class ImageHandler:
                     # Resize to video dimensions if needed
                     if img.size != (self.WIDTH, self.HEIGHT):
                         img = img.resize((self.WIDTH, self.HEIGHT), Image.Resampling.LANCZOS)
+                    
+                    # Use provided output directory or default
+                    if not output_dir:
+                        output_dir = self.DEFAULT_OUTPUT_DIR
+                    output_dir = Path(output_dir)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
                     # Save to file
-                    output_path = self.OUTPUT_DIR / f"frame_{index}.jpg"
+                    output_path = output_dir / f"frame_{index}.jpg"
                     img.save(str(output_path), "JPEG", quality=95)
                 
                 print(f"Successfully generated image {index + 1}")
@@ -94,12 +112,18 @@ class ImageHandler:
             print(f"Error generating image: {str(e)}")
             return None
 
-    async def generate_images(self, prompts: list[str]) -> list[str]:
-        """Generate all images and return their file paths"""
+    async def generate_images(self, prompts: list[str], output_dir: str = None) -> list[str]:
+        """
+        Generate all images and return their file paths
+        
+        Args:
+            prompts: List of image generation prompts
+            output_dir: Optional output directory (defaults to contents/images)
+        """
         image_paths = []
         
         for i, prompt in enumerate(prompts):
-            image_path = await self.generate_image(prompt, i, len(prompts))
+            image_path = await self.generate_image(prompt, i, len(prompts), output_dir)
             if image_path:
                 image_paths.append(image_path)
         

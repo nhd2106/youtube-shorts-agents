@@ -77,7 +77,6 @@ Follow these guidelines:
       * {format_spec['style']}
       * Structured as: Attention-grabbing hook → Problem → Solution → Call to action
       * Concluding with "Nếu thấy video này hữu ích, đừng ngại bấm like và đăng ký để ủng hộ kênh!"
-      * Ending with a question or prompt for the next video topic
     - do not include any icons 
 3. Hashtags:
     - Mix relevant Vietnamese and English hashtags

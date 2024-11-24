@@ -66,9 +66,10 @@ class VideoGenerator:
             }
         }
         
-        self.OUTPUT_DIR = Path("contents/video")
-        self.THUMBNAIL_DIR = Path("contents/thumbnail")
-        self.TEMP_DIR = Path("contents/temp")  # Add temp directory
+        self.DEFAULT_VIDEO_DIR = Path("contents/video")
+        self.DEFAULT_THUMBNAIL_DIR = Path("contents/thumbnail")
+        self.DEFAULT_TEMP_DIR = Path("contents/temp")
+        
         # Default to shorts format
         self.WIDTH = self.VIDEO_FORMATS["shorts"]["width"]
         self.HEIGHT = self.VIDEO_FORMATS["shorts"]["height"]
@@ -85,9 +86,9 @@ class VideoGenerator:
         self._patch_moviepy_resize()
 
         # Ensure output directories exist
-        os.makedirs(self.OUTPUT_DIR, exist_ok=True)
-        os.makedirs(self.THUMBNAIL_DIR, exist_ok=True)
-        os.makedirs(self.TEMP_DIR, exist_ok=True)  # Create temp directory
+        os.makedirs(self.DEFAULT_VIDEO_DIR, exist_ok=True)
+        os.makedirs(self.DEFAULT_THUMBNAIL_DIR, exist_ok=True)
+        os.makedirs(self.DEFAULT_TEMP_DIR, exist_ok=True)
 
     def _patch_moviepy_resize(self):
         """Patch MoviePy's resize function to use Lanczos instead of ANTIALIAS"""
@@ -240,7 +241,8 @@ class VideoGenerator:
                 'transform': lambda t: {
                     'scale': 1.0,
                     'pos_x': 0,
-                    'pos_y': 0
+                    'pos_y': 0,
+                    'needs_resize': False
                 }
             },
             # Zoom in
@@ -249,7 +251,8 @@ class VideoGenerator:
                 'transform': lambda t: {
                     'scale': 1.0 + (0.15 * ease_in_out(t)),
                     'pos_x': 0,
-                    'pos_y': 0
+                    'pos_y': 0,
+                    'needs_resize': True
                 }
             },
             # Zoom out
@@ -258,7 +261,8 @@ class VideoGenerator:
                 'transform': lambda t: {
                     'scale': 1.15 - (0.15 * ease_in_out(t)),
                     'pos_x': 0,
-                    'pos_y': 0
+                    'pos_y': 0,
+                    'needs_resize': True
                 }
             },
             # Pan right
@@ -267,7 +271,8 @@ class VideoGenerator:
                 'transform': lambda t: {
                     'scale': 1.0,
                     'pos_x': -clip.w * 0.1 * ease_in_out(t),
-                    'pos_y': 0
+                    'pos_y': 0,
+                    'needs_resize': False
                 }
             },
             # Pan left
@@ -276,7 +281,8 @@ class VideoGenerator:
                 'transform': lambda t: {
                     'scale': 1.0,
                     'pos_x': clip.w * 0.1 * ease_in_out(t),
-                    'pos_y': 0
+                    'pos_y': 0,
+                    'needs_resize': False
                 }
             }
         ]
@@ -290,13 +296,13 @@ class VideoGenerator:
             params = effect['transform'](t)
             
             # If no transformation needed
-            if params['scale'] == 1.0 and params['pos_x'] == 0:
+            if params['scale'] == 1.0 and params['pos_x'] == 0 and not params['needs_resize']:
                 return frame
             
             img = Image.fromarray(frame)
             
-            # Handle zoom
-            if params['scale'] != 1.0:
+            # Handle zoom only if needed
+            if params['needs_resize']:
                 new_w = int(clip.w * params['scale'])
                 new_h = int(clip.h * params['scale'])
                 img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -315,7 +321,7 @@ class VideoGenerator:
             y2 = y1 + clip.h
             
             # Ensure boundaries
-            if params['scale'] != 1.0:
+            if params['needs_resize']:
                 x1 = max(0, min(x1, new_w - clip.w))
                 y1 = max(0, min(y1, new_h - clip.h))
                 x2 = min(new_w, x1 + clip.w)
@@ -381,19 +387,51 @@ class VideoGenerator:
     async def generate_video(
         self,
         audio_path: str,
-        content: dict,
+        content: Dict[str, Any],
         filename: str,
-        background_images: list[str] = None,
-        progress_callback: callable = None
-    ) -> dict:
-        """Generate video from script data and image paths"""
+        background_images: List[str],
+        progress_callback=None,
+        output_dir: str = None,
+        thumbnail_dir: str = None,
+        temp_dir: str = None
+    ) -> Dict[str, str]:
+        """
+        Generate video with audio and images
+        
+        Args:
+            audio_path: Path to audio file
+            content: Content dictionary with script and metadata
+            filename: Output filename (without extension)
+            background_images: List of background image paths
+            progress_callback: Optional callback for progress updates
+            output_dir: Optional video output directory
+            thumbnail_dir: Optional thumbnail output directory
+            temp_dir: Optional temporary files directory
+        """
         try:
-            # Create output paths
-            video_path = self.OUTPUT_DIR / f"{filename}.mp4"
+            # Use provided directories or defaults
+            video_dir = Path(output_dir) if output_dir else self.DEFAULT_VIDEO_DIR
+            thumbnail_dir = Path(thumbnail_dir) if thumbnail_dir else self.DEFAULT_THUMBNAIL_DIR
+            temp_dir = Path(temp_dir) if temp_dir else self.DEFAULT_TEMP_DIR
             
-            # Load audio
-            print("Loading audio...")
+            # Create directories if they don't exist
+            video_dir.mkdir(parents=True, exist_ok=True)
+            thumbnail_dir.mkdir(parents=True, exist_ok=True)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Set output paths
+            video_path = video_dir / f"{filename}.mp4"
+            thumbnail_path = thumbnail_dir / f"{filename}_thumb.jpg"
+            temp_audio_path = temp_dir / "temp-audio.m4a"
+            
+            # Load and preprocess audio
+            print("Loading and preprocessing audio...")
             audio = AudioFileClip(audio_path)
+            
+            # Normalize audio and ensure consistent format
+            audio = audio.set_fps(44100)  # Standard audio sampling rate
+            audio = audio.set_duration(audio.duration)  # Ensure duration is set correctly
+            
             self.DURATION = audio.duration
             print(f"Audio duration: {self.DURATION}")
 
@@ -451,23 +489,45 @@ class VideoGenerator:
 
             final = CompositeVideoClip(clips, size=(self.WIDTH, self.HEIGHT))
             final = final.set_duration(self.DURATION)
-            final = final.set_audio(audio)
+            
+            # Write audio to temporary file first
+            print("\nPreprocessing audio...")
+            audio.write_audiofile(
+                str(temp_audio_path),
+                fps=44100,
+                nbytes=4,
+                codec='aac',
+                bitrate='192k',
+                ffmpeg_params=["-strict", "-2"]
+            )
+            
+            # Load preprocessed audio
+            processed_audio = AudioFileClip(str(temp_audio_path))
+            final = final.set_audio(processed_audio)
 
-            # Write final video
+            # Write final video with optimized parameters
             print(f"\nWriting video to: {video_path}")
             final.write_videofile(
                 str(video_path),
                 fps=30,
                 codec='libx264',
                 audio_codec='aac',
-                temp_audiofile='temp-audio.m4a',
-                remove_temp=True
+                audio_fps=44100,
+                audio_nbytes=4,
+                bitrate='8000k',
+                audio_bitrate='192k',
+                preset='medium',
+                threads=4,
+                ffmpeg_params=[
+                    "-strict", "-2",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart"
+                ]
             )
 
             # Generate thumbnail from first frame
             print("\nGenerating thumbnail...")
-            thumbnail_path = self.THUMBNAIL_DIR / f"{filename}_thumb.jpg"
-            first_frame = final.get_frame(0)  # Get first frame
+            first_frame = final.get_frame(0)
             first_frame_img = Image.fromarray(first_frame)
             first_frame_img.save(str(thumbnail_path))
 
@@ -475,9 +535,14 @@ class VideoGenerator:
             print("\nCleaning up...")
             final.close()
             audio.close()
+            processed_audio.close()
             background.close()
             for clip in text_clips:
                 clip.close()
+                
+            # Remove temporary audio file
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
 
             print("Video generation completed successfully!")
             return {
@@ -556,7 +621,7 @@ class VideoGenerator:
         
         return final_clip
 
-    async def generate_prompts_with_openai(self, script: str) -> list[str]:
+    async def generate_prompts_with_openai(self, script: str) -> List[str]:
         """Generate image prompts using OpenAI"""
         try:
             response = await openai.AsyncOpenAI().chat.completions.create(

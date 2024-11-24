@@ -9,7 +9,6 @@ together==0.2.11
 proglog==0.1.10
 SpeechRecognition==3.10.1
 requests==2.31.0
-pocketsphinx==0.1.15
 wave==0.0.2
 
 gradio==4.25

@@ -354,8 +354,8 @@ class VideoGenerator:
                 with Image.open(image_path) as img:
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
-                    # Make image slightly larger to allow for pan/zoom effects
-                    target_size = (int(self.WIDTH * 1.4), int(self.HEIGHT * 1.4))
+                    # Resize to exact video dimensions
+                    target_size = (self.WIDTH, self.HEIGHT)
                     img = img.resize(target_size, Image.Resampling.LANCZOS)
                     # Convert to numpy array
                     img_array = np.array(img)

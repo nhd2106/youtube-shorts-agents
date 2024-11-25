@@ -384,6 +384,124 @@ class VideoGenerator:
         
         return clips
 
+    async def get_speech_to_text_segments(self, audio_path: str) -> list[dict]:
+        """Get text segments with precise timings using Whisper speech-to-text"""
+        try:
+            print("Loading Whisper model...")
+            model = whisper.load_model("medium")  # Using medium model for better accuracy
+            
+            # First detect the language
+            print("Detecting language...")
+            audio = whisper.load_audio(audio_path)
+            audio = whisper.pad_or_trim(audio)
+            mel = whisper.log_mel_spectrogram(audio).to(model.device)
+            _, probs = model.detect_language(mel)
+            detected_lang = max(probs, key=probs.get)
+            print(f"Detected language: {detected_lang}")
+            
+            # Set force language based on detection
+            force_language = None
+            if detected_lang == "vi":
+                force_language = "vi"
+            elif detected_lang in ["en", "en-US", "en-GB"]:
+                force_language = "en"
+            
+            print(f"Transcribing audio in {force_language if force_language else 'auto'} mode...")
+            result = model.transcribe(
+                audio_path,
+                word_timestamps=True,
+                language=force_language,
+                task="transcribe",
+                condition_on_previous_text=True,
+                initial_prompt=f"This is a {force_language} language video." if force_language else None
+            )
+            
+            # Process segments to combine words into phrases
+            segments = []
+            current_segment = {
+                'words': [],
+                'start': None,
+                'end': None
+            }
+            word_count = 0
+            
+            # Process each word with its timing
+            for segment in result["segments"]:
+                for word_data in segment["words"]:
+                    word = word_data["word"].strip()
+                    if not word:
+                        continue
+                        
+                    # Start new segment if needed
+                    if current_segment['start'] is None:
+                        current_segment['start'] = word_data["start"]
+                    
+                    current_segment['words'].append(word)
+                    word_count += 1
+                    current_segment['end'] = word_data["end"]
+                    
+                    # Check if we should create a new segment
+                    should_segment = (
+                        word_count >= 9 or  # Target 9-10 words per segment
+                        word.endswith(('.', '!', '?')) or  # End of sentence
+                        (word_count >= 7 and word.endswith((',', ';', ':'))) or  # Natural break point
+                        word_count >= 10  # Force break at 10 words
+                    )
+                    
+                    if should_segment and current_segment['words']:
+                        # Join words and clean up spacing
+                        text = ' '.join(current_segment['words'])
+                        # Clean up spacing around punctuation
+                        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+                        # Normalize spaces
+                        text = ' '.join(text.split())
+                        
+                        segments.append({
+                            'word': text,
+                            'start': current_segment['start'],
+                            'end': current_segment['end'],
+                            'duration': current_segment['end'] - current_segment['start']
+                        })
+                        
+                        # Reset for next segment
+                        current_segment = {
+                            'words': [],
+                            'start': None,
+                            'end': None
+                        }
+                        word_count = 0
+            
+            # Add any remaining words
+            if current_segment['words']:
+                # Clean up final segment
+                text = ' '.join(current_segment['words'])
+                text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+                text = ' '.join(text.split())
+                
+                segments.append({
+                    'word': text,
+                    'start': current_segment['start'],
+                    'end': current_segment['end'],
+                    'duration': current_segment['end'] - current_segment['start']
+                })
+            
+            # Post-process segments to ensure consistent language
+            if segments:
+                # Add small gaps between segments for readability
+                for i in range(len(segments) - 1):
+                    gap = min(0.1, (segments[i+1]['start'] - segments[i]['end']) / 2)
+                    segments[i]['end'] -= gap
+                    segments[i+1]['start'] += gap
+                    segments[i]['duration'] = segments[i]['end'] - segments[i]['start']
+                    segments[i+1]['duration'] = segments[i+1]['end'] - segments[i+1]['start']
+            
+            return segments
+            
+        except Exception as e:
+            print(f"Error in speech-to-text transcription: {str(e)}")
+            traceback.print_exc()
+            return []
+
     async def generate_video(
         self,
         audio_path: str,
@@ -395,19 +513,6 @@ class VideoGenerator:
         thumbnail_dir: str = None,
         temp_dir: str = None
     ) -> Dict[str, str]:
-        """
-        Generate video with audio and images
-        
-        Args:
-            audio_path: Path to audio file
-            content: Content dictionary with script and metadata
-            filename: Output filename (without extension)
-            background_images: List of background image paths
-            progress_callback: Optional callback for progress updates
-            output_dir: Optional video output directory
-            thumbnail_dir: Optional thumbnail output directory
-            temp_dir: Optional temporary files directory
-        """
         try:
             # Use provided directories or defaults
             video_dir = Path(output_dir) if output_dir else self.DEFAULT_VIDEO_DIR
@@ -435,11 +540,12 @@ class VideoGenerator:
             self.DURATION = audio.duration
             print(f"Audio duration: {self.DURATION}")
 
-            # Get phrase timings first
-            print("\nGetting phrase timings...")
-            phrase_timings = await self.get_precise_word_timings(audio_path, content['script'])
+            # Get speech-to-text segments with precise timings
+            print("\nGetting speech-to-text segments...")
+            phrase_timings = await self.get_speech_to_text_segments(audio_path)
             if not phrase_timings:
-                raise ValueError("Failed to get phrase timings")
+                print("Falling back to script-based timing...")
+                phrase_timings = await self.get_precise_word_timings(audio_path, content['script'])
             print(f"Generated {len(phrase_timings)} phrase timings")
 
             # Calculate durations for background clips
@@ -505,55 +611,35 @@ class VideoGenerator:
             processed_audio = AudioFileClip(str(temp_audio_path))
             final = final.set_audio(processed_audio)
 
-            # Write final video with optimized parameters
+            # Write final video
             print(f"\nWriting video to: {video_path}")
             final.write_videofile(
                 str(video_path),
                 fps=30,
                 codec='libx264',
                 audio_codec='aac',
-                audio_fps=44100,
-                audio_nbytes=4,
-                bitrate='8000k',
                 audio_bitrate='192k',
-                preset='medium',
-                threads=4,
-                ffmpeg_params=[
-                    "-strict", "-2",
-                    "-pix_fmt", "yuv420p",
-                    "-movflags", "+faststart"
-                ]
+                bitrate='8000k',
+                threads=2,
+                logger=MyBarLogger(progress_callback)
             )
-
-            # Generate thumbnail from first frame
-            print("\nGenerating thumbnail...")
-            first_frame = final.get_frame(0)
-            first_frame_img = Image.fromarray(first_frame)
-            first_frame_img.save(str(thumbnail_path))
-
-            # Cleanup
-            print("\nCleaning up...")
-            final.close()
+            
+            # Clean up
             audio.close()
             processed_audio.close()
-            background.close()
-            for clip in text_clips:
-                clip.close()
-                
-            # Remove temporary audio file
+            final.close()
             if os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
-
-            print("Video generation completed successfully!")
+            
             return {
                 'video_path': str(video_path),
                 'thumbnail_path': str(thumbnail_path)
             }
-
+            
         except Exception as e:
-            print(f"\nError in generate_video: {str(e)}")
+            print(f"Error generating video: {str(e)}")
             traceback.print_exc()
-            return None
+            raise
 
     def set_format(self, format_type: str):
         """Set the video format (shorts or normal)"""
@@ -807,22 +893,22 @@ class VideoGenerator:
             total_duration = librosa.get_duration(y=y, sr=sr)
             
             # Timing parameters - adjusted for better sync
-            SPEED_FACTOR = 1.0  # Normal speed (was 0.9)
-            BASE_WORD_DURATION = 0.3  # Longer base duration (was 0.25)
-            MIN_PHRASE_DURATION = 1.5  # Longer minimum duration (was 1.2)
-            GAP_DURATION = 0.15  # Longer gap between phrases (was 0.08)
+            SPEED_FACTOR = 0.95  # Slightly slower speed for better sync
+            BASE_WORD_DURATION = 0.35  # Increased base duration
+            MIN_PHRASE_DURATION = 1.8  # Longer minimum duration
+            GAP_DURATION = 0.2  # Longer gap between phrases
             
             # Count total words and calculate average time per word
             total_words = sum(len(phrase.split()) for phrase in phrases)
             available_duration = total_duration - (len(phrases) * GAP_DURATION)
-            avg_time_per_word = available_duration / total_words
+            avg_time_per_word = (available_duration * SPEED_FACTOR) / total_words
             
             # Use the larger of calculated or base duration for more natural pacing
             word_duration = max(avg_time_per_word, BASE_WORD_DURATION)
             
-            # Generate timings
+            # Generate timings with a slight delay at start
             timings = []
-            current_time = 0.0
+            current_time = 0.1  # Small initial delay
             
             for phrase in phrases:
                 # Calculate base duration from words
@@ -831,12 +917,13 @@ class VideoGenerator:
                 
                 # Add extra time for punctuation
                 if phrase.strip().endswith(('.', '!', '?')):
-                    base_duration += 0.3  # Longer end of sentence pause (was 0.2)
+                    base_duration += 0.4  # Longer end of sentence pause
                 elif phrase.strip().endswith((',', ';', ':')):
-                    base_duration += 0.2  # Longer mid-sentence pause (was 0.1)
+                    base_duration += 0.3  # Longer mid-sentence pause
                 
-                # Ensure minimum duration
-                duration = max(base_duration, MIN_PHRASE_DURATION)
+                # Ensure minimum duration with some variability
+                min_duration = max(MIN_PHRASE_DURATION, words * 0.3)  # Dynamic minimum based on word count
+                duration = max(base_duration, min_duration)
                 
                 # Create timing entry
                 timing = {
@@ -852,7 +939,7 @@ class VideoGenerator:
             
             # If we're over total duration, scale back proportionally
             if current_time > total_duration:
-                scale_factor = total_duration / current_time
+                scale_factor = (total_duration - 0.2) / current_time  # Leave small buffer at end
                 for timing in timings:
                     timing['start'] *= scale_factor
                     timing['end'] *= scale_factor
@@ -1023,10 +1110,15 @@ class VideoGenerator:
                     current_start = segment["start"]
                 buffer.append(subtitle_words[subtitle_idx])
                 
-                # Create phrase segment based on punctuation or length
-                if (len(buffer) >= 8 or  # Max words per phrase
-                    subtitle_words[subtitle_idx][-1] in '.!?'):  # End of sentence
+                # Create phrase segment based on word count, punctuation, or length
+                should_segment = (
+                    len(buffer) >= 9 or  # Target 9-10 words per segment
+                    (len(buffer) >= 7 and subtitle_words[subtitle_idx][-1] in '.!?') or  # End sentence if 7+ words
+                    subtitle_words[subtitle_idx][-1] in '.!?' or  # Always break at end of sentence
+                    (len(buffer) >= 10)  # Force break at 10 words
+                )
                 
+                if should_segment:
                     aligned_segments.append({
                         "word": " ".join(buffer),
                         "start": current_start,
@@ -1035,9 +1127,9 @@ class VideoGenerator:
                     })
                     buffer = []
                     current_start = None
-                
-                subtitle_idx += 1
-        
+            
+            subtitle_idx += 1
+    
         # Add remaining buffer
         if buffer and current_start:
             aligned_segments.append({
@@ -1046,7 +1138,7 @@ class VideoGenerator:
                 "end": word_segments[-1]["end"],
                 "duration": word_segments[-1]["end"] - current_start
             })
-        
+    
         return aligned_segments
 
     def _clean_text(self, text: str) -> str:

@@ -25,13 +25,15 @@ class ContentGenerator:
                     "type": "shorts",
                     "duration": "60s",
                     "script_length": "60 - 75 seconds",
-                    "style": "energetic and engaging"
+                    "style": "energetic and engaging",
+                    "word_count": "200-250 words"
                 },
                 "normal": {
                     "type": "normal",
                     "duration": "flexible",
-                    "script_length": "2-10 minutes",
-                    "style": "detailed and comprehensive"
+                    "script_length": "8-10 minutes",
+                    "style": "detailed and comprehensive",
+                    "word_count": "1200-1500 words"
                 }
             }
 
@@ -55,15 +57,22 @@ Guidelines for content creation:
     - Keep it clear, concise, and compelling
     - Avoid clickbait - ensure the title accurately reflects content
 
-2. Script Structure:
-    A. Hook (First 3 seconds) - Choose ONE:
-        • Present a surprising statistic or fact that challenges assumptions
-        • Offer a thought-provoking statement that stops scrolling
-        • Share a relatable personal experience with emotional impact
-        • Provide an actionable insight that promises value
-        • Reveal an unexpected fact that creates curiosity
-
-    B. Storytelling Framework - Select ONE:
+2. Script rules:
+    - Content Type Guidelines:
+        • Historical: Include precise dates, locations, and detailed context
+        • Narrative: Ensure complete, satisfying story arcs with character development
+        • Factual: Present {format_spec["type"] == "shorts" and "7-10" or "15-20"} verified, engaging facts
+        • Tutorial: Provide clear, step-by-step instructions with detailed explanations
+        • Opinion: Balance viewpoints with evidence and expert citations
+    - Content Requirements:
+        • Consistently match the input language
+        • Focus solely on the requested topic
+        • Target length: {format_spec["word_count"]} for a {format_spec["script_length"]} video
+        • Keep the tone {format_spec["style"]}
+        • For normal format: Include detailed examples, case studies, or real-world applications
+        • For shorts: Keep it concise and immediately engaging
+        • Conclude with: in English "If you found this helpful, like and subscribe for more!"  and in Vietnamese "Nếu bạn thấy hay, đừng quên bấm like và đăng ký để ủng hộ kênh" 
+    - Storytelling Framework - Select ONE:
         • Hero's Journey: Challenge → Struggle → Triumph
         • 7-Second Hook: Grab attention in the first 7 seconds
         • Problem-Solution-Benefit Structure
@@ -71,21 +80,7 @@ Guidelines for content creation:
         • Dual-Perspective Story: Before/After format
         • 10-Second Engagement Rule
         • Rhythmic/Rhyming Pattern for memorability
-
-    C. Content Requirements:
-        • Consistently match the input language
-        • Focus solely on the requested topic
-        • Maintain a duration of {format_spec["script_length"]}
-        • Keep the tone {format_spec["style"]}
-        • Structure as: Hook → Problem → Solution → Call-to-Action
-        • Conclude with: "If you found this helpful, like and subscribe for more!" in English and "Nếu bạn thấy hay, đừng quên bấm like và đăng ký để ủng hộ kênh" in Vietnamese
-
-    D. Content Type Guidelines:
-        • Historical: Include precise dates and locations
-        • Narrative: Ensure complete, satisfying story arcs
-        • Factual: Present 7-10 verified, engaging facts
-        • Tutorial: Provide clear, step-by-step instructions
-        • Opinion: Balance viewpoints with evidence
+    * Remember: Language must match with the user input language
 
 3. Hashtag Strategy:
     - Blend English and topic-specific hashtags
@@ -99,6 +94,8 @@ Guidelines for content creation:
     - Focus on audience engagement and value delivery
     - Keep content concise and impactful
     - Avoid filler content or unnecessary details
+    - For normal format: Include supporting details, examples, and deeper analysis
+    - For shorts: Focus on key points and immediate value
 
 Note: Exclude emojis, icons, or special characters from the script content.'''
 

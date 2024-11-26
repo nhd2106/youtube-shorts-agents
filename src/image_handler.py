@@ -28,9 +28,11 @@ class ImageHandler:
         }
         
         self.DEFAULT_OUTPUT_DIR = Path("contents/images")
-        self.current_format = "shorts"
-        self.WIDTH = self.VIDEO_FORMATS["shorts"]["width"]
-        self.HEIGHT = self.VIDEO_FORMATS["shorts"]["height"]
+        
+        # Don't set default format in __init__, wait for explicit set_format call
+        self.current_format = None
+        self.WIDTH = None
+        self.HEIGHT = None
 
     async def generate_image(
         self,
@@ -64,6 +66,11 @@ class ImageHandler:
             else:
                 width = 16 * width_steps  # 1024 pixels (16:9 ratio)
                 height = 9 * height_steps  # 576 pixels
+            
+
+            print(width, height)
+
+            
             
             print(f"Generating {self.current_format} format image {index + 1}/{length}")
             
@@ -131,7 +138,14 @@ class ImageHandler:
 
     def set_format(self, format_type: str):
         """Set the video format (shorts or normal)"""
-        if format_type in self.VIDEO_FORMATS:
+        if format_type not in self.VIDEO_FORMATS:
+            raise ValueError(f"Invalid format type. Choose from: {list(self.VIDEO_FORMATS.keys())}")
+        
+        if self.current_format != format_type:  # Only update if format is different
             self.current_format = format_type
             self.WIDTH = self.VIDEO_FORMATS[format_type]["width"]
             self.HEIGHT = self.VIDEO_FORMATS[format_type]["height"]
+            print(f"Image format set to {format_type} with dimensions {self.WIDTH}x{self.HEIGHT}")
+        
+        if self.WIDTH is None or self.HEIGHT is None:
+            raise ValueError("Format must be set before generating images")

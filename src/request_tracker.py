@@ -9,6 +9,7 @@ class RequestStatus(Enum):
     GENERATING_CONTENT = "generating_content"
     GENERATING_AUDIO = "generating_audio"
     GENERATING_IMAGES = "generating_images"
+    WAITING_FOR_IMAGE_SELECTION = "waiting_for_image_selection"
     GENERATING_VIDEO = "generating_video"
     COMPLETED = "completed"
     FAILED = "failed"

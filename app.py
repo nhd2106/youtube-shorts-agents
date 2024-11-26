@@ -472,4 +472,5 @@ def save_content_to_file(
     return filepath
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.getenv('PORT', 5123))
+    app.run(debug=True, port=port)

@@ -15,6 +15,7 @@ from src.youtube_uploader import YouTubeUploader
 import time
 from datetime import datetime
 import threading
+import traceback
 
 app = Flask(__name__)
 CORS(app)
@@ -68,6 +69,10 @@ def generate() -> tuple[Any, int]:
 
         if voice and voice not in available_models[tts_model]['voices']:
             return jsonify({'error': 'Invalid voice for selected model'}), 400
+
+        # Set the format for image and video generation
+        image_handler.set_format(video_format)
+        video_generator.set_format(video_format)
 
         # Create request and start generation in background
         request_id = request_tracker.create_request()
@@ -125,6 +130,86 @@ def get_status(request_id: str) -> tuple[Any, int]:
         
         return jsonify(response), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prepare-video-data', methods=['POST'])
+def prepare_video_data() -> tuple[Any, int]:
+    """Generate and return all necessary data for client-side video rendering"""
+    try:
+        data: Dict[str, Any] = request.get_json()
+        request_id = data.get('request_id', str(int(time.time())))
+        idea = data.get('idea')
+        video_format = data.get('video_format', 'shorts')
+        tts_model = data.get('tts_model', 'edge')
+        voice = data.get('voice')
+
+        if not idea:
+            return jsonify({'error': 'No idea provided'}), 400
+
+        # Create new request
+        request_id = request_tracker.create_request()
+
+        # Set initial status
+        request_tracker.update_request(request_id, status=RequestStatus.PENDING)
+
+        # Generate content
+        content = content_generator.generate(idea)
+        request_tracker.update_request(request_id, status=RequestStatus.GENERATING_CONTENT)
+
+        # Generate audio
+        audio_path = audio_generator.generate(
+            content['script'],
+            request_id,
+            tts_model=tts_model,
+            voice=voice
+        )
+        request_tracker.update_request(request_id, status=RequestStatus.GENERATING_AUDIO)
+
+        # Generate images
+        background_images = image_handler.generate_background_images(
+            content['image_prompts'],
+            request_id
+        )
+        request_tracker.update_request(request_id, status=RequestStatus.GENERATING_IMAGES)
+
+        # Set video format and get dimensions
+        video_generator.set_format(video_format)
+        
+        # Get word timings for captions
+        word_timings = video_generator.get_precise_word_timings(audio_path, content['script'])
+
+        # Prepare response data
+        response_data = {
+            'request_id': request_id,
+            'content': content,
+            'paths': {
+                'audio': audio_path,
+                'background_images': background_images
+            },
+            'video_settings': {
+                'format': video_format,
+                'width': video_generator.WIDTH,
+                'height': video_generator.HEIGHT,
+                'duration': video_generator.DURATION
+            },
+            'timings': word_timings,
+            'title': {
+                'text': content['title'],
+                'position': {
+                    'x': 'center',
+                    'y': video_generator.HEIGHT // 5  # 1/5 from top
+                }
+            }
+        }
+
+        request_tracker.update_request(request_id, status=RequestStatus.COMPLETED, result=response_data)
+        return jsonify(response_data), 200
+
+    except Exception as e:
+        print(f"Error in prepare_video_data: {str(e)}")
+        traceback.print_exc()
+        if 'request_id' in locals():
+            request_tracker.update_request(request_id, status=RequestStatus.FAILED, error=str(e))
         return jsonify({'error': str(e)}), 500
 
 def get_request_directory(request_id: str, content_type: str = None) -> str:
@@ -218,6 +303,12 @@ async def generate_content_video(
 ) -> None:
     """Generate content and video based on idea and parameters"""
     try:
+        print(f"Starting content generation with format: {video_format}")
+        
+        # Set video format for all generators at the start
+        video_generator.set_format(video_format)
+        image_handler.set_format(video_format)
+        
         # Update status to generating content
         request_tracker.update_request(
             request_id=request_id,
@@ -227,6 +318,8 @@ async def generate_content_video(
         
         # Generate content with format
         content = await content_generator.generate_content(idea, video_format)
+        
+        print(f"Content generated, current format: {video_generator.current_format}")
         
         # Start audio generation and image generation in parallel
         audio_filename = f"{request_id}_audio"
@@ -254,6 +347,9 @@ async def generate_content_video(
             progress=40
         )
         
+        # Verify format is still correct before image generation
+        print(f"Before image generation, format: {image_handler.current_format}")
+        
         # Start generating images while audio is being generated
         prompts = await video_generator.generate_prompts_with_openai(content['script'])
         image_task = image_handler.generate_images(
@@ -263,6 +359,9 @@ async def generate_content_video(
         
         # Wait for both tasks to complete
         audio_path, image_paths = await asyncio.gather(audio_task, image_task)
+        
+        # Verify format is still correct before video generation
+        print(f"Before video generation, format: {video_generator.current_format}")
         
         # Verify audio file exists before proceeding
         if not os.path.exists(audio_path):

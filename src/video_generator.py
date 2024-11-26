@@ -3,6 +3,8 @@ import json
 import math
 import asyncio
 import traceback
+import numpy as np
+from PIL import Image
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -19,7 +21,6 @@ import openai
 import time
 from together import Together
 from proglog import ProgressBarLogger
-from PIL import Image
 from difflib import SequenceMatcher
 import tempfile
 import vosk
@@ -70,11 +71,10 @@ class VideoGenerator:
         self.DEFAULT_THUMBNAIL_DIR = Path("contents/thumbnail")
         self.DEFAULT_TEMP_DIR = Path("contents/temp")
         
-        # Default to shorts format
-        self.WIDTH = self.VIDEO_FORMATS["shorts"]["width"]
-        self.HEIGHT = self.VIDEO_FORMATS["shorts"]["height"]
-        self.DURATION = None
-        self.current_format = "shorts"
+        # Don't set default format in __init__, wait for explicit set_format call
+        self.current_format = None
+        self.WIDTH = None
+        self.HEIGHT = None
         
         # Set ImageMagick binary path for MoviePy
         if os.path.exists('/opt/homebrew/bin/convert'):
@@ -576,6 +576,17 @@ class VideoGenerator:
             print("\nCreating text clips...")
             text_clips = []
             
+            # Create and add title clip first - make it last the entire video
+            print("\nCreating title clip...")
+            title_clip = self.create_title_clip(content['title'], self.DURATION)  # Show title for entire video
+            if title_clip:
+                # Position title at the top of the video
+                title_clip = title_clip.set_position(('center', self.HEIGHT // 5))  # 1/5 from top
+                text_clips.append(title_clip)
+                print(f"Added title clip: {content['title']} (duration: {self.DURATION}s)")
+            
+            # Add subtitle clips
+            print("\nCreating subtitle clips...")
             for timing in phrase_timings:
                 clip = self.create_text_clip(
                     timing['word'],
@@ -584,10 +595,10 @@ class VideoGenerator:
                 )
                 if clip:
                     text_clips.append(clip)
-                    print(f"Added clip for: {timing['word']}")
+                    print(f"Added subtitle clip for: {timing['word']}")
 
-            print(f"\nCreated {len(text_clips)} text clips")
-
+            print(f"\nCreated {len(text_clips)} text clips (including title)")
+            
             # Create final composition
             print("\nCreating final composition...")
             clips = [background] + text_clips
@@ -631,6 +642,15 @@ class VideoGenerator:
             if os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
             
+            # Generate thumbnail from the first frame
+            print("\nGenerating thumbnail...")
+            video_clip = VideoFileClip(str(video_path))
+            thumbnail = video_clip.get_frame(0)  # Get first frame
+            thumbnail_img = Image.fromarray(np.uint8(thumbnail))
+            thumbnail_img.save(str(thumbnail_path), quality=95)
+            video_clip.close()
+            print(f"Thumbnail saved to: {thumbnail_path}")
+            
             return {
                 'video_path': str(video_path),
                 'thumbnail_path': str(thumbnail_path)
@@ -642,11 +662,14 @@ class VideoGenerator:
             raise
 
     def set_format(self, format_type: str):
-        """Set the video format (shorts or normal)"""
-        if format_type in self.VIDEO_FORMATS:
-            self.current_format = format_type
-            self.WIDTH = self.VIDEO_FORMATS[format_type]["width"]
-            self.HEIGHT = self.VIDEO_FORMATS[format_type]["height"]
+        """Set the video format and update dimensions"""
+        if format_type not in self.VIDEO_FORMATS:
+            raise ValueError(f"Invalid format type. Must be one of: {list(self.VIDEO_FORMATS.keys())}")
+            
+        self.current_format = format_type
+        format_spec = self.VIDEO_FORMATS[format_type]
+        self.WIDTH = format_spec["width"]
+        self.HEIGHT = format_spec["height"]
 
     def create_title_clip(self, text: str, duration: float) -> TextClip:
         """Create an enhanced title clip with dynamic effects"""
@@ -708,8 +731,11 @@ class VideoGenerator:
         return final_clip
 
     async def generate_prompts_with_openai(self, script: str) -> List[str]:
+        video_format = self.current_format
         """Generate image prompts using OpenAI"""
         try:
+            prompt_count = "9-10" if video_format == "shorts" else "18-20"
+            
             response = await openai.AsyncOpenAI().chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -717,7 +743,7 @@ class VideoGenerator:
                         "role": "system",
                         "content": """You are a professional cinematographer creating video prompts. 
                         Create prompts for black-forest-labs/FLUX.1-schnell-Free model. Your task is to:
-                        1. Create 6-8 if shorts format, 10-12 if normal format cinematic, photorealistic prompts
+                        1. Create 9-10 if shorts format, 18-20 if normal format cinematic, photorealistic prompts
                         2. Each prompt MUST include camera angle and cinematography techniques
                         3. Use these essential cinematography terms in your prompts:
                            - Camera angles: Low angle, High angle, Overhead, FPV (First Person View), Wide angle
@@ -739,7 +765,7 @@ class VideoGenerator:
                     },
                     {
                         "role": "user",
-                        "content": f"""Create 9-10 cinematic prompts for this script: 
+                        "content": f"""Create {prompt_count} cinematic prompts for this script: 
                         {script}
                         
                         Requirements:

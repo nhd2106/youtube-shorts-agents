@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-plugins-good \
     imagemagick \
     git \
+    zlib1g-dev \
+    libjpeg-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure ImageMagick policy
@@ -26,14 +28,23 @@ COPY policy.xml /etc/ImageMagick-6/policy.xml
 # Upgrade pip and install build tools
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Install core dependencies first
+RUN pip install --no-cache-dir \
+    numpy>=1.21.0 \
+    decorator>=4.4.2 \
+    imageio>=2.9.0 \
+    imageio-ffmpeg>=0.4.5 \
+    proglog>=0.1.10 \
+    tqdm>=4.64.1 \
+    requests>=2.31.0
 
-# Install dependencies in stages
+# Copy requirements and install remaining dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy the application code and templates
 COPY . .
+COPY templates /app/templates
 
 # Create necessary directories
 RUN mkdir -p generated contents/video contents/thumbnail contents/temp

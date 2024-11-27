@@ -1,29 +1,35 @@
-# Web Framework
-flask>=2.0.0
-flask-cors>=4.0.0
-
-# Environment and Configuration
-python-dotenv>=1.0.0
+# Core Dependencies
+numpy>=1.21.0
+decorator>=4.4.2
+imageio>=2.9.0
+imageio-ffmpeg>=0.4.5
+proglog>=0.1.10
+tqdm>=4.64.1
+requests>=2.31.0
 
 # Video Processing
 moviepy>=1.0.3
 Pillow>=9.5.0
-numpy>=1.21.0
+
+# Web Framework
+flask>=2.0.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0
 
 # AI and Machine Learning
 openai>=1.0.0
 together>=0.2.0
+
+# PyTorch (CPU version)
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.0.0
 torchaudio>=2.0.0
-deepspeed>=0.13.0
 
 # Audio Processing
 edge-tts>=6.1.9
 gTTS>=2.5.1
 SpeechRecognition>=3.10.0
 wave>=0.0.2
-proglog>=0.1.10
 
 # Natural Language Processing
 deepfilternet>=0.5.0
@@ -33,10 +39,8 @@ cutlet>=0.3.0
 unidic-lite>=1.0.8
 
 # Utility
-requests>=2.31.0
 typing-extensions>=4.0.0
 pathlib>=1.0.1
-asyncio==3.4.3
 aiohttp>=3.8.0
 google-api-python-client>=2.0.0
 google-auth-oauthlib>=1.0.0
@@ -47,4 +51,3 @@ gradio>=4.0.0
 # Optional Dependencies
 vosk>=0.3.45
 openai-whisper>=20231117
-# TTS==0.22.0  # Uncomment if needed

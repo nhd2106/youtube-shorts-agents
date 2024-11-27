@@ -16,19 +16,20 @@ RUN apt-get update && apt-get install -y \
     libgirepository1.0-dev \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
     imagemagick \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure ImageMagick policy to allow PDF operations
-RUN sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml
+# Configure ImageMagick policy
+COPY policy.xml /etc/ImageMagick-6/policy.xml
 
-# Install Python packages in stages to optimize caching
+# Upgrade pip and install build tools
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies with pip
+# Install dependencies in stages
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application

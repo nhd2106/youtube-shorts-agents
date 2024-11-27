@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 import asyncio
 import os
@@ -36,6 +36,11 @@ def clean_old_requests():
 
 cleaning_thread = threading.Thread(target=clean_old_requests, daemon=True)
 cleaning_thread.start()
+
+@app.route('/')
+def home():
+    """Render the homepage"""
+    return render_template('index.html')
 
 @app.route('/api/models', methods=['GET'])
 def get_available_models() -> tuple[Any, int]:

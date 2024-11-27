@@ -7,7 +7,23 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     ffmpeg \
     libsndfile1 \
+    libespeak-ng1 \
+    espeak-ng \
+    python3-pip \
+    python3-dev \
+    pkg-config \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    imagemagick \
+    git \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure ImageMagick policy to allow PDF operations
+RUN sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml
 
 # Install Python packages in stages to optimize caching
 COPY requirements.txt .
@@ -18,12 +34,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Create directories for generated content
-RUN mkdir -p generated
+# Create necessary directories
+RUN mkdir -p generated contents/video contents/thumbnail contents/temp
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5000
+ENV PYTHONPATH=/app
+ENV IMAGEMAGICK_BINARY=/usr/bin/convert
+
+# Set permissions for generated content directories
+RUN chmod -R 777 generated contents
 
 # Expose the port
 EXPOSE ${PORT}

@@ -30,13 +30,16 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Install core dependencies first
 RUN pip install --no-cache-dir \
-    numpy>=1.21.0 \
-    decorator>=4.4.2 \
-    imageio>=2.9.0 \
-    imageio-ffmpeg>=0.4.5 \
-    proglog>=0.1.10 \
-    tqdm>=4.64.1 \
-    requests>=2.31.0
+    numpy==1.21.0 \
+    decorator==4.4.2 \
+    imageio==2.31.1 \
+    imageio-ffmpeg==0.4.8 \
+    proglog==0.1.10 \
+    tqdm==4.65.0 \
+    requests==2.31.0
+
+# Install moviepy separately
+RUN pip install --no-cache-dir moviepy==1.0.3
 
 # Copy requirements and install remaining dependencies
 COPY requirements.txt .
@@ -48,6 +51,9 @@ COPY templates /app/templates
 
 # Create necessary directories
 RUN mkdir -p generated contents/video contents/thumbnail contents/temp
+
+# Verify moviepy installation
+RUN python -c "from moviepy.editor import *; print('MoviePy successfully installed')"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

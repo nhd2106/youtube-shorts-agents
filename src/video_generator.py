@@ -366,7 +366,20 @@ class VideoGenerator:
                 
                 # Apply transitions with error handling
                 try:
-                    clip = self._apply_random_transitions(base_clip, duration)
+                    # Apply zoom_in effect for the first image
+                    if i == 0:
+                        effect = {
+                            'name': 'zoom_in',
+                            'transform': lambda t: {
+                                'scale': 1.0 + (0.15 * self.ease_in_out(t/duration)),
+                                'pos_x': 0,
+                                'pos_y': 0,
+                                'needs_resize': True
+                            }
+                        }
+                        clip = self._apply_specific_transition(base_clip, duration, effect)
+                    else:
+                        clip = self._apply_random_transitions(base_clip, duration)
                 except Exception as e:
                     print(f"Transition failed for clip {i + 1}, using basic clip: {str(e)}")
                     clip = base_clip
@@ -383,6 +396,61 @@ class VideoGenerator:
                 continue
         
         return clips
+
+    def _apply_specific_transition(self, clip, duration, effect):
+        """Apply a specific transition effect to a clip"""
+        from moviepy.video.VideoClip import VideoClip
+        
+        def make_frame(t):
+            frame = clip.get_frame(t)
+            params = effect['transform'](t)
+            
+            # If no transformation needed
+            if params['scale'] == 1.0 and params['pos_x'] == 0 and not params['needs_resize']:
+                return frame
+            
+            img = Image.fromarray(frame)
+            
+            # Handle zoom only if needed
+            if params['needs_resize']:
+                new_w = int(clip.w * params['scale'])
+                new_h = int(clip.h * params['scale'])
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                
+                # Center the zoomed image
+                x1 = (new_w - clip.w) // 2
+                y1 = (new_h - clip.h) // 2
+            else:
+                x1 = 0
+                y1 = 0
+            
+            # Apply pan offset
+            x1 += int(params['pos_x'])
+            y1 += int(params['pos_y'])
+            x2 = x1 + clip.w
+            y2 = y1 + clip.h
+            
+            # Ensure boundaries
+            if params['needs_resize']:
+                x1 = max(0, min(x1, new_w - clip.w))
+                y1 = max(0, min(y1, new_h - clip.h))
+                x2 = min(new_w, x1 + clip.w)
+                y2 = min(new_h, y1 + clip.h)
+            else:
+                x1 = max(0, min(x1, clip.w))
+                y1 = max(0, min(y1, clip.h))
+                x2 = min(clip.w, x1 + clip.w)
+                y2 = min(clip.h, y1 + clip.h)
+            
+            img = img.crop((x1, y1, x2, y2))
+            return np.array(img)
+        
+        new_clip = VideoClip(make_frame, duration=duration)
+        new_clip = new_clip.set_duration(duration)
+        new_clip = new_clip.fadein(duration * 0.05)
+        new_clip = new_clip.fadeout(duration * 0.05)
+        
+        return new_clip
 
     async def get_speech_to_text_segments(self, audio_path: str) -> list[dict]:
         """Get text segments with precise timings using Whisper speech-to-text"""
@@ -773,7 +841,7 @@ class VideoGenerator:
                         - MUST include lighting and atmosphere descriptions
                         - Focus on photorealistic quality
                         - Incorporate relevant subject matter from the script
-                        - Each prompt should be under 300 characters
+                        - Each prompt should be under 500 characters
                         - Include time of day or weather elements when relevant
                         - No timestamps or descriptions, just the prompts
                         """

@@ -33,7 +33,7 @@ class ContentGenerator:
                     "duration": "flexible",
                     "script_length": "8-10 minutes",
                     "style": "detailed and comprehensive",
-                    "word_count": "1200-1500 words"
+                    "word_count": "2500 - 3000 words"
                 }
             }
 
@@ -71,7 +71,7 @@ Guidelines for content creation:
         • Keep the tone {format_spec["style"]}
         • For normal format: Include detailed examples, case studies, or real-world applications
         • For shorts: Keep it concise and immediately engaging
-        • Conclude with: in English "If you found this helpful, like and subscribe for more!"  and in Vietnamese "Nếu bạn thấy hay, đừng quên bấm like và đăng ký để ủng hộ kênh" 
+        • Conclude with: in English "If you found this helpful, like and subscribe for more!"  or in Vietnamese "Nếu bạn thấy hay, đừng quên bấm like và đăng ký để ủng hộ kênh" (Choose one based on the user input language)
     - Storytelling Framework - Select ONE:
         • Hero's Journey: Challenge → Struggle → Triumph
         • 7-Second Hook: Grab attention in the first 7 seconds

@@ -10,6 +10,7 @@ proglog==0.1.10
 SpeechRecognition==3.10.1
 requests==2.31.0
 wave==0.0.2
+edge-tts==6.1.9
 
 gradio==4.25
 deepfilternet==0.5.6

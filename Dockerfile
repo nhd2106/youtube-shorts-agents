@@ -23,7 +23,8 @@ RUN apt-get update && apt-get install -y \
     libsndfile1-dev \
     libportaudio2 \
     portaudio19-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Configure ImageMagick policy
 COPY policy.xml /etc/ImageMagick-6/policy.xml
@@ -35,10 +36,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir "numpy>=1.22.0,<2.0.0" && \
     pip install --no-cache-dir decorator>=4.4.2 imageio>=2.9.0 imageio-ffmpeg>=0.4.5 && \
     pip install --no-cache-dir tqdm>=4.64.1 requests>=2.31.0 Pillow>=9.5.0 proglog>=0.1.10 && \
-    pip install --no-cache-dir moviepy==1.0.3
+    pip install --no-cache-dir moviepy==1.0.3 && \
+    rm -rf /root/.cache/pip/*
 
 # Install audio processing dependencies
-RUN pip install --no-cache-dir soundfile>=0.12.1 librosa>=0.10.1
+RUN pip install --no-cache-dir soundfile>=0.12.1 librosa>=0.10.1 && \
+    rm -rf /root/.cache/pip/*
 
 # Verify installations
 RUN python -c "import moviepy; from moviepy.editor import VideoFileClip; print('MoviePy version:', moviepy.__version__)"
@@ -46,7 +49,8 @@ RUN python -c "import soundfile as sf; print('soundfile successfully installed')
 
 # Copy requirements and install remaining dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    rm -rf /root/.cache/pip/*
 
 # Copy the application code and templates
 COPY . .
@@ -61,15 +65,34 @@ ENV PORT=5123
 ENV PYTHONPATH=/app
 ENV IMAGEMAGICK_BINARY=/usr/bin/convert
 ENV FLASK_APP=app.py
-ENV FLASK_ENV=development
+ENV FLASK_ENV=production
+# Memory optimization
+ENV PYTHONDOWNWRITEBUFFERSIZE=65536
+ENV PYTHONMALLOC=debug
 
 # Set permissions for generated content directories
 RUN chmod -R 777 generated contents
 
-# Expose port (both TCP and UDP)
-EXPOSE 5123/tcp
-EXPOSE 5123/udp
+# Expose port (TCP only is sufficient)
+EXPOSE 5123
 
-# Run the application with gunicorn for better production performance
-RUN pip install gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5123", "--workers", "4", "--threads", "2", "--timeout", "120", "app:app"]
+# Install gunicorn
+RUN pip install --no-cache-dir gunicorn
+
+# Create a script to run gunicorn with memory limits
+RUN echo '#!/bin/bash\n\
+exec gunicorn \
+    --bind 0.0.0.0:5123 \
+    --workers 2 \
+    --threads 1 \
+    --timeout 300 \
+    --max-requests 1000 \
+    --max-requests-jitter 50 \
+    --worker-class gthread \
+    --worker-tmp-dir /dev/shm \
+    --log-level info \
+    app:app' > /app/start.sh && \
+    chmod +x /app/start.sh
+
+# Run the application with memory-optimized settings
+CMD ["/app/start.sh"]

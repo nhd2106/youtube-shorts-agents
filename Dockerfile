@@ -60,13 +60,16 @@ ENV PYTHONUNBUFFERED=1
 ENV PORT=5123
 ENV PYTHONPATH=/app
 ENV IMAGEMAGICK_BINARY=/usr/bin/convert
-ENV HOST=0.0.0.0
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=development
 
 # Set permissions for generated content directories
 RUN chmod -R 777 generated contents
 
-# Expose the port
-EXPOSE 5123
+# Expose port (both TCP and UDP)
+EXPOSE 5123/tcp
+EXPOSE 5123/udp
 
-# Run the application
-CMD ["python", "app.py"]
+# Run the application with gunicorn for better production performance
+RUN pip install gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5123", "--workers", "4", "--threads", "2", "--timeout", "120", "app:app"]

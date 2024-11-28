@@ -28,16 +28,24 @@ COPY policy.xml /etc/ImageMagick-6/policy.xml
 # Upgrade pip and install build tools
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Copy requirements first
+# Install moviepy and its dependencies first
+RUN pip install --no-cache-dir \
+    numpy>=1.22.0,<2.0.0 \
+    decorator>=4.4.2 \
+    imageio>=2.9.0 \
+    imageio-ffmpeg>=0.4.5 \
+    tqdm>=4.64.1 \
+    requests>=2.31.0 \
+    Pillow>=9.5.0 \
+    proglog>=0.1.10 \
+    moviepy==1.0.3
+
+# Verify moviepy installation
+RUN python -c "import moviepy; from moviepy.editor import VideoFileClip; print('MoviePy version:', moviepy.__version__)"
+
+# Copy requirements and install remaining dependencies
 COPY requirements.txt .
-
-# Install all dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Verify installations
-RUN python -c "import numpy; print(f'numpy version: {numpy.__version__}')"
-RUN python -c "import moviepy.editor; print('moviepy successfully installed')"
-RUN python -c "import deepfilternet; print('deepfilternet successfully installed')"
 
 # Copy the application code and templates
 COPY . .

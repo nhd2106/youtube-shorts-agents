@@ -478,5 +478,9 @@ def save_content_to_file(
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5123))
-    host = os.getenv('HOST', '0.0.0.0')
-    app.run(host=host, port=port, debug=True)
+    app.run(
+        host='0.0.0.0',  # Bind to all available network interfaces
+        port=port,
+        debug=True,
+        threaded=True    # Enable threading for better concurrent request handling
+    )

@@ -5,9 +5,9 @@ imageio>=2.9.0
 imageio-ffmpeg>=0.4.5
 tqdm>=4.64.1
 requests>=2.31.0
+moviepy==1.0.3
 
-# Video and Image Processing
-moviepy>=1.0.3
+# Image Processing
 Pillow>=9.5.0
 proglog>=0.1.10
 

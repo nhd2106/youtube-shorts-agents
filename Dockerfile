@@ -57,15 +57,16 @@ RUN mkdir -p generated contents/video contents/thumbnail contents/temp
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PORT=5000
+ENV PORT=5123
 ENV PYTHONPATH=/app
 ENV IMAGEMAGICK_BINARY=/usr/bin/convert
+ENV HOST=0.0.0.0
 
 # Set permissions for generated content directories
 RUN chmod -R 777 generated contents
 
 # Expose the port
-EXPOSE ${PORT}
+EXPOSE 5123
 
 # Run the application
 CMD ["python", "app.py"]

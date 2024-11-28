@@ -29,16 +29,10 @@ COPY policy.xml /etc/ImageMagick-6/policy.xml
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Install moviepy and its dependencies first
-RUN pip install --no-cache-dir \
-    numpy>=1.22.0,<2.0.0 \
-    decorator>=4.4.2 \
-    imageio>=2.9.0 \
-    imageio-ffmpeg>=0.4.5 \
-    tqdm>=4.64.1 \
-    requests>=2.31.0 \
-    Pillow>=9.5.0 \
-    proglog>=0.1.10 \
-    moviepy==1.0.3
+RUN pip install --no-cache-dir "numpy>=1.22.0,<2.0.0" && \
+    pip install --no-cache-dir decorator>=4.4.2 imageio>=2.9.0 imageio-ffmpeg>=0.4.5 && \
+    pip install --no-cache-dir tqdm>=4.64.1 requests>=2.31.0 Pillow>=9.5.0 proglog>=0.1.10 && \
+    pip install --no-cache-dir moviepy==1.0.3
 
 # Verify moviepy installation
 RUN python -c "import moviepy; from moviepy.editor import VideoFileClip; print('MoviePy version:', moviepy.__version__)"

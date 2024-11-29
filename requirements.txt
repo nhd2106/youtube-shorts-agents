@@ -32,6 +32,8 @@ SpeechRecognition>=3.10.0
 wave>=0.0.2
 soundfile>=0.12.1
 librosa>=0.10.1
+pydub>=0.25.1
+vosk==0.3.44
 
 # Natural Language Processing
 deepfilternet>=0.5.0
@@ -51,5 +53,4 @@ google-auth-oauthlib>=1.0.0
 gradio>=4.0.0
 
 # Optional Dependencies
-vosk>=0.3.45
 openai-whisper>=20231117

@@ -2,7 +2,7 @@
 *.mp3
 *.mp4
 *.wav
-/contents
+/contents/*
 /src/_pycache_
 /src/__pycache__
 /venv

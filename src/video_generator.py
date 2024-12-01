@@ -997,10 +997,10 @@ class VideoGenerator:
             total_duration = librosa.get_duration(y=y, sr=sr)
             
             # Timing parameters - adjusted for better sync
-            SPEED_FACTOR = 0.95  # Slightly slower speed for better sync
-            BASE_WORD_DURATION = 0.35  # Increased base duration
-            MIN_PHRASE_DURATION = 1.8  # Longer minimum duration
-            GAP_DURATION = 0.2  # Longer gap between phrases
+            SPEED_FACTOR = 1.0  # Normal speed (was 0.95)
+            BASE_WORD_DURATION = 0.3  # Slightly reduced base duration (was 0.35)
+            MIN_PHRASE_DURATION = 1.5  # Slightly reduced minimum duration (was 1.8)
+            GAP_DURATION = 0.15  # Slightly reduced gap (was 0.2)
             
             # Count total words and calculate average time per word
             total_words = sum(len(phrase.split()) for phrase in phrases)
@@ -1010,9 +1010,9 @@ class VideoGenerator:
             # Use the larger of calculated or base duration for more natural pacing
             word_duration = max(avg_time_per_word, BASE_WORD_DURATION)
             
-            # Generate timings with a slight delay at start
+            # Generate timings with a minimal initial delay
             timings = []
-            current_time = 0.1  # Small initial delay
+            current_time = 0.05  # Reduced initial delay (was 0.1)
             
             for phrase in phrases:
                 # Calculate base duration from words
@@ -1021,12 +1021,12 @@ class VideoGenerator:
                 
                 # Add extra time for punctuation
                 if phrase.strip().endswith(('.', '!', '?')):
-                    base_duration += 0.4  # Longer end of sentence pause
+                    base_duration += 0.3  # Reduced end of sentence pause (was 0.4)
                 elif phrase.strip().endswith((',', ';', ':')):
-                    base_duration += 0.3  # Longer mid-sentence pause
+                    base_duration += 0.2  # Reduced mid-sentence pause (was 0.3)
                 
                 # Ensure minimum duration with some variability
-                min_duration = max(MIN_PHRASE_DURATION, words * 0.3)  # Dynamic minimum based on word count
+                min_duration = max(MIN_PHRASE_DURATION, words * 0.25)  # Reduced word-based minimum (was 0.3)
                 duration = max(base_duration, min_duration)
                 
                 # Create timing entry
@@ -1040,17 +1040,19 @@ class VideoGenerator:
                 
                 # Update current time with gap
                 current_time += duration + GAP_DURATION
-            
+        
             # If we're over total duration, scale back proportionally
             if current_time > total_duration:
-                scale_factor = (total_duration - 0.2) / current_time  # Leave small buffer at end
+                scale_factor = (total_duration - 0.1) / current_time  # Reduced end buffer (was 0.2)
                 for timing in timings:
                     timing['start'] *= scale_factor
                     timing['end'] *= scale_factor
                     timing['duration'] *= scale_factor
-            
-            return timings
-            
+        
+            # Apply timing adjustments for better sync
+            adjusted_timings = self._adjust_timing_gaps(timings)
+            return adjusted_timings
+        
         except Exception as e:
             print(f"Error in precise word timing: {str(e)}")
             return self._get_fallback_timings(subtitle_text)

@@ -23,10 +23,10 @@ class ContentGenerator:
             format_specs = {
                 "shorts": {
                     "type": "shorts",
-                    "duration": "60s",
-                    "script_length": "60 - 75 seconds",
+                    "duration": "70s",
+                    "script_length": "70 - 85 seconds",
                     "style": "energetic and engaging",
-                    "word_count": "200-250 words"
+                    "word_count": "250-300 words"
                 },
                 "normal": {
                     "type": "normal",
@@ -64,8 +64,11 @@ Guidelines for content creation:
         • Factual: Present {format_spec["type"] == "shorts" and "7-10" or "15-20"} verified, engaging facts
         • Tutorial: Provide clear, step-by-step instructions with detailed explanations
         • Opinion: Balance viewpoints with evidence and expert citations
+    - Reference Guidelines:
+        • when user paste a link, you need to read the content and summarize it, don't too short.
     - Content Requirements:
         • Consistently match the input language
+        • don't seperate numbers by comma or dot, keep them together
         • Focus solely on the requested topic
         • Target length: {format_spec["word_count"]} for a {format_spec["script_length"]} video
         • Keep the tone {format_spec["style"]}

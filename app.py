@@ -114,27 +114,48 @@ def get_status(request_id: str) -> tuple[Any, int]:
     try:
         request_data = request_tracker.get_request(request_id)
         if not request_data:
+            print(f"Request not found: {request_id}")
+            print(f"Available requests: {list(request_tracker._requests.keys())}")
             return jsonify({'error': 'Request not found'}), 404
+
+        # Convert Enum to string for status
+        status = request_data.status.value if hasattr(request_data.status, 'value') else request_data.status
 
         # Add stage descriptions for better UX
         stage_descriptions = {
-            'pending': 'Initializing...',
-            'generating_content': 'Generating video script and content...',
-            'generating_audio': 'Converting script to audio...',
-            'generating_images': 'Creating background images...',
-            'generating_video': 'Assembling final video...',
-            'completed': 'Video generation completed!',
-            'failed': 'Video generation failed.'
+            RequestStatus.PENDING.value: 'Initializing...',
+            RequestStatus.GENERATING_CONTENT.value: 'Generating video script and content...',
+            RequestStatus.GENERATING_AUDIO.value: 'Converting script to audio...',
+            RequestStatus.GENERATING_IMAGES.value: 'Creating background images...',
+            RequestStatus.GENERATING_VIDEO.value: 'Assembling final video...',
+            RequestStatus.COMPLETED.value: 'Video generation completed!',
+            RequestStatus.FAILED.value: 'Video generation failed.'
         }
 
+        # Convert RequestData to dict if needed
+        if hasattr(request_data, '__dict__'):
+            request_dict = {
+                'status': status,
+                'progress': request_data.progress,
+                'result': request_data.result,
+                'error': request_data.error,
+                'created_at': request_data.created_at,
+                'updated_at': request_data.updated_at
+            }
+        else:
+            request_dict = request_data
+
         response = {
-            **request_data,
-            'stage_description': stage_descriptions.get(request_data['status'], ''),
-            'estimated_time_remaining': None  # Could be implemented based on average completion times
+            **request_dict,
+            'stage_description': stage_descriptions.get(status, ''),
+            'estimated_time_remaining': None
         }
         
         return jsonify(response), 200
     except Exception as e:
+        print(f"Error in get_status: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/prepare-video-data', methods=['POST'])

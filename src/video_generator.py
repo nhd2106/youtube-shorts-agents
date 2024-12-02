@@ -25,7 +25,7 @@ from difflib import SequenceMatcher
 import tempfile
 import vosk
 import soundfile as sf
-import whisper
+
 import torch
 from pydub import AudioSegment
 import ssl
@@ -170,7 +170,7 @@ class VideoGenerator:
                 return None
 
             # Font settings
-            fontsize = 72 if self.current_format == "shorts" else 60
+            fontsize = 62 if self.current_format == "shorts" else 50
             
             # Create the main text clip
             txt_clip = TextClip(
@@ -180,7 +180,7 @@ class VideoGenerator:
                 color='yellow',  # Changed to yellow
                 stroke_color='black',
                 stroke_width=2,
-                size=(self.WIDTH * 0.9, None),
+                size=(self.WIDTH * 0.7, None),
                 method='caption',
                 align='center'
             )
@@ -495,11 +495,15 @@ class VideoGenerator:
             word_count = 0
             
             while True:
-                data = wf.buffer_read(4000, dtype='int16')
+                # Read audio data as numpy array
+                data = wf.read(4000, dtype='int16')
                 if len(data) == 0:
                     break
                 
-                if rec.AcceptWaveform(data):
+                # Convert numpy array to bytes
+                data_bytes = data.tobytes()
+                
+                if rec.AcceptWaveform(data_bytes):
                     result = json.loads(rec.Result())
                     if result.get('result'):
                         for word_data in result['result']:
@@ -563,21 +567,10 @@ class VideoGenerator:
             if wav_path != audio_path:
                 os.remove(wav_path)
             
-            # Post-process segments
-            if segments:
-                # Add small gaps between segments for readability
-                for i in range(len(segments) - 1):
-                    gap = min(0.1, (segments[i+1]['start'] - segments[i]['end']) / 2)
-                    segments[i]['end'] -= gap
-                    segments[i+1]['start'] += gap
-                    segments[i]['duration'] = segments[i]['end'] - segments[i]['start']
-                    segments[i+1]['duration'] = segments[i+1]['end'] - segments[i+1]['start']
-            
             return segments
             
         except Exception as e:
             print(f"Error in speech-to-text transcription: {str(e)}")
-            traceback.print_exc()
             return []
 
     async def generate_video(
@@ -659,7 +652,7 @@ class VideoGenerator:
             title_clip = self.create_title_clip(content['title'], self.DURATION)  # Show title for entire video
             if title_clip:
                 # Position title at the top of the video
-                title_clip = title_clip.set_position(('center', self.HEIGHT // 5))  # 1/5 from top
+                title_clip = title_clip.set_position(('center', self.HEIGHT // 6))  # 1/5 from top
                 text_clips.append(title_clip)
                 print(f"Added title clip: {content['title']} (duration: {self.DURATION}s)")
             
@@ -752,14 +745,14 @@ class VideoGenerator:
     def create_title_clip(self, text: str, duration: float) -> TextClip:
         """Create an enhanced title clip with dynamic effects"""
         # Reduce title size
-        fontsize = 72 if self.current_format == "shorts" else 60  # Reduced from 90/72
+        fontsize = 62 if self.current_format == "shorts" else 50  # Reduced from 90/72
         
         text_clip = TextClip(
             text,
             font='Arial-Bold',
             fontsize=fontsize,
             color='yellow',
-            size=(self.WIDTH - 100, None),
+            size=(self.WIDTH - 250, None),
             method='caption',
             align='center',
             stroke_color='yellow',

@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, redirect
 from flask_cors import CORS
 import asyncio
 import os
@@ -18,7 +18,15 @@ import threading
 import traceback
 
 app = Flask(__name__)
-# Update CORS configuration to allow specific origin
+
+# Force HTTPS redirect
+@app.before_request
+def before_request():
+    if not request.is_secure and app.env != "development":
+        url = request.url.replace("http://", "https://", 1)
+        return redirect(url, code=301)
+
+# Update CORS configuration to enforce HTTPS
 CORS(app, resources={
     r"/api/*": {
         "origins": [
@@ -29,7 +37,8 @@ CORS(app, resources={
         "allow_headers": ["Content-Type", "Authorization"],
         "expose_headers": ["Content-Range", "X-Content-Range"],
         "supports_credentials": True,
-        "max_age": 600  # Cache preflight requests for 10 minutes
+        "max_age": 600,
+        "enforce_https": True  # Add HTTPS enforcement
     }
 })
 

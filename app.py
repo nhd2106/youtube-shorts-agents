@@ -131,54 +131,43 @@ def get_status(request_id: str) -> tuple[Any, int]:
     try:
         request_data = request_tracker.get_request(request_id)
         if not request_data:
-            # Add more detailed logging
             app.logger.warning(f"Request not found: {request_id}")
             app.logger.debug(f"Current requests in tracker: {list(request_tracker._requests.keys())}")
             
-            # Return a more informative error response
             return jsonify({
                 'error': 'Request not found',
                 'details': 'The request may have expired or was not properly initialized',
                 'request_id': request_id
             }), 404
 
-        # Convert Enum to string for status
-        status = request_data.status.value if hasattr(request_data.status, 'value') else request_data.status
+        # Get status from dictionary
+        status = request_data['status']
 
-        # Add stage descriptions for better UX
+        # Define stage descriptions
         stage_descriptions = {
-            RequestStatus.PENDING.value: 'Initializing...',
-            RequestStatus.GENERATING_CONTENT.value: 'Generating video script and content...',
-            RequestStatus.GENERATING_AUDIO.value: 'Converting script to audio...',
-            RequestStatus.GENERATING_IMAGES.value: 'Creating background images...',
-            RequestStatus.GENERATING_VIDEO.value: 'Assembling final video...',
-            RequestStatus.COMPLETED.value: 'Video generation completed!',
-            RequestStatus.FAILED.value: 'Video generation failed.'
+            'pending': 'Initializing...',
+            'generating_content': 'Generating video script and content...',
+            'generating_audio': 'Converting script to audio...',
+            'generating_images': 'Creating background images...',
+            'generating_video': 'Assembling final video...',
+            'completed': 'Video generation completed!',
+            'failed': 'Video generation failed.'
         }
 
-        # Convert RequestData to dict if needed
-        if hasattr(request_data, '__dict__'):
-            request_dict = {
-                'status': status,
-                'progress': request_data.progress,
-                'result': request_data.result,
-                'error': request_data.error,
-                'created_at': request_data.created_at,
-                'updated_at': request_data.updated_at
-            }
-        else:
-            request_dict = request_data
-
+        # Create response using dictionary access
         response = {
-            **request_dict,
+            'status': status,
+            'progress': request_data['progress'],
+            'result': request_data['result'],
+            'error': request_data['error'],
             'stage_description': stage_descriptions.get(status, ''),
             'estimated_time_remaining': None
         }
         
         return jsonify(response), 200
+
     except Exception as e:
-        print(f"Error in get_status: {str(e)}")
-        import traceback
+        app.logger.error(f"Error in get_status: {str(e)}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 

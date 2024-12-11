@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, request, jsonify, send_file, render_template, redirect, make_response
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 import asyncio
 import os
@@ -18,14 +18,7 @@ import threading
 import traceback
 
 app = Flask(__name__)
-# Update CORS configuration with more permissive settings
-CORS(app, resources={
-    r"/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"]
-    }
-})
+CORS(app)
 
 # Initialize generators and request tracker
 content_generator = ContentGenerator()
@@ -49,23 +42,13 @@ def home():
     """Render the homepage"""
     return render_template('index.html')
 
-@app.route('/api/models', methods=['GET', 'OPTIONS'])
-def get_available_models():
+@app.route('/api/models', methods=['GET'])
+def get_available_models() -> tuple[Any, int]:
     """Get available TTS models and voices"""
-    # Handle preflight OPTIONS request
-    if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'https://shorts-generator-seven.vercel.app')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        return response
-
     try:
         models = audio_generator.get_available_models()
-        response = jsonify(models)
-        return response, 200
+        return jsonify(models), 200
     except Exception as e:
-        app.logger.error(f"Error in get_available_models: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate', methods=['POST'])
@@ -131,19 +114,9 @@ def get_status(request_id: str) -> tuple[Any, int]:
     try:
         request_data = request_tracker.get_request(request_id)
         if not request_data:
-            app.logger.warning(f"Request not found: {request_id}")
-            app.logger.debug(f"Current requests in tracker: {list(request_tracker._requests.keys())}")
-            
-            return jsonify({
-                'error': 'Request not found',
-                'details': 'The request may have expired or was not properly initialized',
-                'request_id': request_id
-            }), 404
+            return jsonify({'error': 'Request not found'}), 404
 
-        # Get status from dictionary
-        status = request_data['status']
-
-        # Define stage descriptions
+        # Add stage descriptions for better UX
         stage_descriptions = {
             'pending': 'Initializing...',
             'generating_content': 'Generating video script and content...',
@@ -154,21 +127,14 @@ def get_status(request_id: str) -> tuple[Any, int]:
             'failed': 'Video generation failed.'
         }
 
-        # Create response using dictionary access
         response = {
-            'status': status,
-            'progress': request_data['progress'],
-            'result': request_data['result'],
-            'error': request_data['error'],
-            'stage_description': stage_descriptions.get(status, ''),
-            'estimated_time_remaining': None
+            **request_data,
+            'stage_description': stage_descriptions.get(request_data['status'], ''),
+            'estimated_time_remaining': None  # Could be implemented based on average completion times
         }
         
         return jsonify(response), 200
-
     except Exception as e:
-        app.logger.error(f"Error in get_status: {str(e)}")
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/prepare-video-data', methods=['POST'])
@@ -509,18 +475,6 @@ def save_content_to_file(
         f.write(f"Video: {video_path}\n")
     
     return filepath
-
-@app.after_request
-def add_security_headers(response):
-    """Add security headers to every response"""
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin-allow-popups'
-    response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
-    response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
-    return response
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5123))

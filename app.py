@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, redirect, make_response
 from flask_cors import CORS
 import asyncio
 import os
@@ -18,18 +18,19 @@ import threading
 import traceback
 
 app = Flask(__name__)
-# Update CORS configuration to allow specific origin
+# Update CORS configuration
 CORS(app, resources={
     r"/api/*": {
         "origins": [
-            "https://shorts-generator-seven.vercel.app/*",
-            "http://localhost:3000/*"  # Keep localhost for development
+            "https://shorts-generator-seven.vercel.app",
+            "http://localhost:3000"
         ],
-        "methods": ["GET", "POST"],
+        "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "expose_headers": ["Content-Range", "X-Content-Range"],
         "supports_credentials": True,
-        "max_age": 600  # Cache preflight requests for 10 minutes
+        "max_age": 600,
+        "enforce_https": True
     }
 })
 
@@ -55,13 +56,23 @@ def home():
     """Render the homepage"""
     return render_template('index.html')
 
-@app.route('/api/models', methods=['GET'])
-def get_available_models() -> tuple[Any, int]:
+@app.route('/api/models', methods=['GET', 'OPTIONS'])
+def get_available_models():
     """Get available TTS models and voices"""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'https://shorts-generator-seven.vercel.app')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        return response
+
     try:
         models = audio_generator.get_available_models()
-        return jsonify(models), 200
+        response = jsonify(models)
+        return response, 200
     except Exception as e:
+        app.logger.error(f"Error in get_available_models: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate', methods=['POST'])
@@ -509,6 +520,15 @@ def save_content_to_file(
         f.write(f"Video: {video_path}\n")
     
     return filepath
+
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to every response"""
+    response.headers['Referrer-Policy'] = 'no-referrer-when-downgrade'
+    response.headers['Access-Control-Allow-Origin'] = 'https://shorts-generator-seven.vercel.app'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5123))

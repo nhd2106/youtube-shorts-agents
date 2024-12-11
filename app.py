@@ -18,8 +18,14 @@ import threading
 import traceback
 
 app = Flask(__name__)
-# Update CORS configuration
-CORS(app)
+# Update CORS configuration with more permissive settings
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"]
+    }
+})
 
 # Initialize generators and request tracker
 content_generator = ContentGenerator()
@@ -511,10 +517,13 @@ def save_content_to_file(
 @app.after_request
 def add_security_headers(response):
     """Add security headers to every response"""
-    response.headers['Referrer-Policy'] = 'no-referrer-when-downgrade'
-    response.headers['Access-Control-Allow-Origin'] = 'https://shorts-generator-seven.vercel.app'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin-allow-popups'
+    response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+    response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
     return response
 
 if __name__ == '__main__':

@@ -19,20 +19,7 @@ import traceback
 
 app = Flask(__name__)
 # Update CORS configuration
-CORS(app, resources={
-    r"/api/*": {
-        "origins": [
-            "https://shorts-generator-seven.vercel.app",
-            "http://localhost:3000"
-        ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "expose_headers": ["Content-Range", "X-Content-Range"],
-        "supports_credentials": True,
-        "max_age": 600,
-        "enforce_https": True
-    }
-})
+CORS(app)
 
 # Initialize generators and request tracker
 content_generator = ContentGenerator()

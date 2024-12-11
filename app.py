@@ -131,9 +131,16 @@ def get_status(request_id: str) -> tuple[Any, int]:
     try:
         request_data = request_tracker.get_request(request_id)
         if not request_data:
-            print(f"Request not found: {request_id}")
-            print(f"Available requests: {list(request_tracker._requests.keys())}")
-            return jsonify({'error': 'Request not found'}), 404
+            # Add more detailed logging
+            app.logger.warning(f"Request not found: {request_id}")
+            app.logger.debug(f"Current requests in tracker: {list(request_tracker._requests.keys())}")
+            
+            # Return a more informative error response
+            return jsonify({
+                'error': 'Request not found',
+                'details': 'The request may have expired or was not properly initialized',
+                'request_id': request_id
+            }), 404
 
         # Convert Enum to string for status
         status = request_data.status.value if hasattr(request_data.status, 'value') else request_data.status

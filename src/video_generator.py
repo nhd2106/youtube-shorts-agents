@@ -81,7 +81,7 @@ class VideoGenerator:
             change_settings({"IMAGEMAGICK_BINARY": "/opt/homebrew/bin/convert"})
         elif os.path.exists('/usr/local/bin/convert'):
             change_settings({"IMAGEMAGICK_BINARY": "/usr/local/bin/convert"})
-
+            
         # Patch MoviePy's resize function to use Lanczos
         self._patch_moviepy_resize()
 
@@ -170,7 +170,7 @@ class VideoGenerator:
                 return None
 
             # Font settings
-            fontsize = 72 if self.current_format == "shorts" else 60
+            fontsize = 62 if self.current_format == "shorts" else 50
             
             # Create the main text clip
             txt_clip = TextClip(
@@ -180,7 +180,7 @@ class VideoGenerator:
                 color='yellow',  # Changed to yellow
                 stroke_color='black',
                 stroke_width=2,
-                size=(self.WIDTH * 0.9, None),
+                size=(self.WIDTH * 0.7, None),
                 method='caption',
                 align='center'
             )
@@ -649,7 +649,7 @@ class VideoGenerator:
             title_clip = self.create_title_clip(content['title'], self.DURATION)  # Show title for entire video
             if title_clip:
                 # Position title at the top of the video
-                title_clip = title_clip.set_position(('center', self.HEIGHT // 5))  # 1/5 from top
+                title_clip = title_clip.set_position(('center', self.HEIGHT // 6))  # 1/5 from top
                 text_clips.append(title_clip)
                 print(f"Added title clip: {content['title']} (duration: {self.DURATION}s)")
             
@@ -742,14 +742,14 @@ class VideoGenerator:
     def create_title_clip(self, text: str, duration: float) -> TextClip:
         """Create an enhanced title clip with dynamic effects"""
         # Reduce title size
-        fontsize = 72 if self.current_format == "shorts" else 60  # Reduced from 90/72
+        fontsize = 72 if self.current_format == "shorts" else 50  # Reduced from 90/72
         
         text_clip = TextClip(
             text,
             font='Arial-Bold',
             fontsize=fontsize,
             color='yellow',
-            size=(self.WIDTH - 100, None),
+            size=(self.WIDTH - 200, None),
             method='caption',
             align='center',
             stroke_color='yellow',

@@ -33,20 +33,16 @@ class RequestTracker:
     
     def create_request(self) -> str:
         """Create a new request and return its ID"""
-        with self._lock:
-            request_id = str(uuid.uuid4())
-            request_data = RequestData(
-                request_id=request_id,
-                status=RequestStatus.PENDING,
-                progress=0,
-                result=None,
-                error=None,
-                created_at=time.time(),
-                updated_at=time.time()
-            )
-            self._requests[request_id] = request_data
-            print(f"Created request {request_id} with status {request_data.status}")
-            return request_id
+        request_id = str(uuid.uuid4())
+        self._requests[request_id] = {
+            'status': 'pending',
+            'progress': 0,
+            'result': None,
+            'error': None,
+            'created_at': time.time(),
+            'updated_at': time.time()
+        }
+        return request_id
     
     def get_request(self, request_id: str) -> Optional[RequestData]:
         """Get request data by ID"""
@@ -58,33 +54,15 @@ class RequestTracker:
                 print(f"Request {request_id} not found. Available requests: {list(self._requests.keys())}")
             return request_data
     
-    def update_request(
-        self,
-        request_id: str,
-        status: Optional[RequestStatus] = None,
-        progress: Optional[int] = None,
-        result: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None
-    ) -> None:
+    def update_request(self, request_id: str, **kwargs) -> None:
         """Update request data"""
-        with self._lock:
-            if request_id not in self._requests:
-                print(f"Warning: Attempting to update non-existent request {request_id}")
-                return
-            
-            request_data = self._requests[request_id]
-            
-            if status is not None:
-                request_data.status = status
-            if progress is not None:
-                request_data.progress = progress
-            if result is not None:
-                request_data.result = result
-            if error is not None:
-                request_data.error = error
-            
-            request_data.updated_at = time.time()
-            print(f"Updated request {request_id} - Status: {request_data.status}, Progress: {request_data.progress}")
+        if request_id not in self._requests:
+            raise KeyError(f"Request {request_id} not found")
+        
+        self._requests[request_id].update({
+            **kwargs,
+            'updated_at': time.time()
+        })
     
     def clean_old_requests(self, max_age_hours: int = 24) -> None:
         """Remove requests older than max_age_hours"""

@@ -79,8 +79,8 @@ class VideoGenerator:
         # Set ImageMagick binary path for MoviePy
         if os.path.exists('/opt/homebrew/bin/convert'):
             change_settings({"IMAGEMAGICK_BINARY": "/opt/homebrew/bin/convert"})
-        elif os.path.exists('/usr/bin/convert'):
-            change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
+        elif os.path.exists('/usr/local/bin/convert'):
+            change_settings({"IMAGEMAGICK_BINARY": "/usr/local/bin/convert"})
 
         # Patch MoviePy's resize function to use Lanczos
         self._patch_moviepy_resize()

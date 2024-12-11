@@ -18,7 +18,20 @@ import threading
 import traceback
 
 app = Flask(__name__)
-CORS(app)
+# Update CORS configuration to allow specific origin
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "https://shorts-generator-seven.vercel.app",
+            "http://localhost:3000"  # Keep localhost for development
+        ],
+        "methods": ["GET", "POST"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Range", "X-Content-Range"],
+        "supports_credentials": True,
+        "max_age": 600  # Cache preflight requests for 10 minutes
+    }
+})
 
 # Initialize generators and request tracker
 content_generator = ContentGenerator()

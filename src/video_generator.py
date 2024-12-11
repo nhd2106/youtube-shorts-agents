@@ -472,14 +472,14 @@ class VideoGenerator:
                 print("Downloading Vosk model...")
                 import urllib.request
                 urllib.request.urlretrieve(
-                    "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
+                    "https://alphacephei.com/vosk/models/vosk-model-vn-0.4.zip",
                     "model.zip"
                 )
                 import zipfile
                 with zipfile.ZipFile("model.zip", 'r') as zip_ref:
                     zip_ref.extractall(".")
                 os.remove("model.zip")
-                os.rename("vosk-model-small-en-us-0.15", "model")
+                os.rename("vosk-model-vn-0.4", "model")
             
             model = vosk.Model("model")
             rec = vosk.KaldiRecognizer(model, wf.samplerate)

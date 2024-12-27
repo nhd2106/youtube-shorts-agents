@@ -3,8 +3,9 @@ import edge_tts
 import asyncio
 from gtts import gTTS
 from openai import OpenAI
-# import torch
-# from TTS.api import TTS
+from pathlib import Path
+import hashlib
+import json
 
 class AudioGenerator:
     AVAILABLE_MODELS = {
@@ -25,9 +26,29 @@ class AudioGenerator:
         },
     }
 
+    def __init__(self):
+        self.cache_dir = Path("contents/cache/audio")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.openai_client = None
+        self.semaphore = asyncio.Semaphore(3)  # Limit concurrent API calls
+
     def get_available_models(self) -> dict:
         """Return available TTS models and their voices"""
         return self.AVAILABLE_MODELS
+
+    def _get_cache_key(self, script: str, model: str, voice: str) -> str:
+        """Generate a unique cache key for the audio request"""
+        data = {
+            'script': script,
+            'model': model,
+            'voice': voice
+        }
+        return hashlib.md5(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+    def _get_cached_audio(self, cache_key: str) -> str:
+        """Check if audio exists in cache"""
+        cache_path = self.cache_dir / f"{cache_key}.mp3"
+        return str(cache_path) if cache_path.exists() else None
 
     async def generate_audio(
         self,
@@ -37,16 +58,7 @@ class AudioGenerator:
         voice: str = None,
         output_dir: str = None
     ) -> str:
-        """
-        Generate audio file from script
-        
-        Args:
-            script: Text to convert to speech
-            filename: Output filename (without extension)
-            model: TTS model to use
-            voice: Voice to use
-            output_dir: Optional output directory (defaults to contents/audio)
-        """
+        """Generate audio file from script with caching"""
         try:
             # Validate model and voice selection
             if model not in self.AVAILABLE_MODELS:
@@ -58,52 +70,59 @@ class AudioGenerator:
             if voice not in selected_model["voices"]:
                 raise ValueError(f"Invalid voice for {model}. Available voices: {selected_model['voices']}")
 
-            # Use provided output directory or default
-            if not output_dir:
-                output_dir = "contents/audio"
-            os.makedirs(output_dir, exist_ok=True)
+            # Check cache first
+            cache_key = self._get_cache_key(script, model, voice)
+            cached_path = self._get_cached_audio(cache_key)
             
-            output_path = os.path.join(output_dir, f"{filename}.mp3")
-            
-            if model == "edge":
-                # Edge TTS rate adjustment using communicate options
-                communicate = edge_tts.Communicate(script, voice or "vi-VN-NamMinhNeural")
-                communicate.tts_config.rate = 1.25  # Increase speed by 25%
-                await communicate.save(output_path)
-            elif model == "gtts":
-                # Unfortunately, gTTS doesn't support speed adjustment directly
-                tts = gTTS(text=script, lang='vi')
-                tts.save(output_path)
-            elif model == "openai":
-                client = OpenAI()
-                response = client.audio.speech.create(
-                    model="tts-1",
-                    voice=voice,
-                    input=script,
-                    speed=1.25  # OpenAI TTS supports speed adjustment
-                )
-                response.stream_to_file(output_path)
-            # elif model == "pyttsx3":
-            #     engine = pyttsx3.init()
-            #     # Set Vietnamese voice if available
-            #     for v in engine.getProperty('voices'):
-            #         if 'vietnam' in v.languages:
-            #             engine.setProperty('voice', v.id)
-            #             break
-            #     engine.save_to_file(script, output_path)
-            #     engine.runAndWait()
-            # elif model == "TTS":
-            #     # Initialize TTS with a Vietnamese-compatible model
-            #     tts = TTS(model_name="tts_models/vi/vivos/vits", progress_bar=False)
-            #     # Generate audio with specific settings for better Vietnamese quality
-            #     tts.tts_to_file(
-            #         text=script,
-            #         file_path=output_path,
-            #         speaker_wav=None,  # Optional: can be used for voice cloning
-            #         language="vi"
-            #     )
-            
-            return output_path
+            if cached_path:
+                # Use provided output directory or default
+                if not output_dir:
+                    output_dir = "contents/audio"
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                output_path = output_dir / f"{filename}.mp3"
+                
+                # Copy from cache to output directory
+                import shutil
+                shutil.copy2(cached_path, output_path)
+                return str(output_path)
+
+            async with self.semaphore:
+                # Use provided output directory or default
+                if not output_dir:
+                    output_dir = "contents/audio"
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                output_path = output_dir / f"{filename}.mp3"
+                cache_path = self.cache_dir / f"{cache_key}.mp3"
+                
+                if model == "edge":
+                    # Edge TTS rate adjustment using communicate options
+                    communicate = edge_tts.Communicate(script, voice or "vi-VN-NamMinhNeural")
+                    communicate.tts_config.rate = 1.25  # Increase speed by 25%
+                    await communicate.save(str(output_path))
+                elif model == "gtts":
+                    # Unfortunately, gTTS doesn't support speed adjustment directly
+                    tts = gTTS(text=script, lang='vi')
+                    tts.save(str(output_path))
+                elif model == "openai":
+                    if not self.openai_client:
+                        self.openai_client = OpenAI()
+                    response = self.openai_client.audio.speech.create(
+                        model="tts-1",
+                        voice=voice,
+                        input=script,
+                        speed=1.25  # OpenAI TTS supports speed adjustment
+                    )
+                    response.stream_to_file(str(output_path))
+                
+                # Cache the generated audio
+                import shutil
+                shutil.copy2(output_path, cache_path)
+                
+                return str(output_path)
             
         except Exception as e:
             print(f"Error generating audio: {str(e)}")

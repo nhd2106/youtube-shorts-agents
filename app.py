@@ -314,6 +314,14 @@ async def generate_content_video(
         video_generator.set_format(video_format)
         image_handler.set_format(video_format)
         
+        # Create all required directories at once
+        dirs = [
+            get_request_directory(request_id, 'audio'),
+            get_request_directory(request_id, 'images'),
+            get_request_directory(request_id, 'video'),
+            get_request_directory(request_id, 'script')
+        ]
+        
         # Update status to generating content
         request_tracker.update_request(
             request_id=request_id,
@@ -324,49 +332,46 @@ async def generate_content_video(
         # Generate content with format
         content = await content_generator.generate_content(idea, video_format)
         
-        print(f"Content generated, current format: {video_generator.current_format}")
-        
-        # Start audio generation and image generation in parallel
+        # Start all generation tasks in parallel
         audio_filename = f"{request_id}_audio"
         video_filename = f"{request_id}_{video_format}_video"
         
-        # Update status to generating audio and images
+        # Create all tasks at once
+        tasks = [
+            # Audio generation task
+            audio_generator.generate_audio(
+                script=content['script'],
+                filename=audio_filename,
+                model=tts_model,
+                voice=voice,
+                output_dir=dirs[0]  # audio dir
+            ),
+            # Image prompts generation task
+            video_generator.generate_prompts_with_openai(content['script']),
+        ]
+        
+        # Update status for parallel processing
         request_tracker.update_request(
             request_id=request_id,
             status=RequestStatus.GENERATING_AUDIO,
             progress=30
         )
         
-        # Create tasks for parallel execution
-        audio_task = audio_generator.generate_audio(
-            script=content['script'],
-            filename=audio_filename,
-            model=tts_model,
-            voice=voice,
-            output_dir=get_request_directory(request_id, 'audio')
-        )
+        # Wait for both audio and prompts
+        audio_path, prompts = await asyncio.gather(*tasks)
         
+        # Start image generation immediately after getting prompts
         request_tracker.update_request(
             request_id=request_id,
             status=RequestStatus.GENERATING_IMAGES,
             progress=40
         )
         
-        # Verify format is still correct before image generation
-        print(f"Before image generation, format: {image_handler.current_format}")
-        
-        # Start generating images while audio is being generated
-        prompts = await video_generator.generate_prompts_with_openai(content['script'])
-        image_task = image_handler.generate_images(
+        # Generate images
+        image_paths = await image_handler.generate_images(
             prompts,
-            output_dir=get_request_directory(request_id, 'images')
+            output_dir=dirs[1]  # images dir
         )
-        
-        # Wait for both tasks to complete
-        audio_path, image_paths = await asyncio.gather(audio_task, image_task)
-        
-        # Verify format is still correct before video generation
-        print(f"Before video generation, format: {video_generator.current_format}")
         
         # Verify audio file exists before proceeding
         if not os.path.exists(audio_path):
@@ -384,7 +389,7 @@ async def generate_content_video(
             audio_path=audio_path,
             content=content,
             filename=video_filename,
-            output_dir=get_request_directory(request_id, 'video'),
+            output_dir=dirs[2],  # video dir
             background_images=image_paths,
             progress_callback=lambda p: request_tracker.update_request(
                 request_id=request_id,
@@ -405,7 +410,7 @@ async def generate_content_video(
             audio_path=audio_path,
             tts_model=tts_model,
             voice=voice,
-            output_dir=get_request_directory(request_id, 'script')
+            output_dir=dirs[3]  # script dir
         )
         
         # Update request with final result

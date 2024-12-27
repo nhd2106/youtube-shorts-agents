@@ -12,6 +12,7 @@ class ImageHandler:
         self.together_client = Together()
         self.last_request_time = 0
         self.RATE_LIMIT_DELAY = 10  # 10 seconds between requests
+        self.BATCH_SIZE = 3  # Process images in batches of 3
         
         # Define video format specifications
         self.VIDEO_FORMATS = {
@@ -33,6 +34,9 @@ class ImageHandler:
         self.current_format = None
         self.WIDTH = None
         self.HEIGHT = None
+        
+        # Create image processing semaphore
+        self.semaphore = asyncio.Semaphore(3)  # Limit concurrent API calls
 
     async def generate_image(
         self,
@@ -41,98 +45,104 @@ class ImageHandler:
         length: int,
         output_dir: str = None
     ) -> str:
-        """
-        Generate an image and save it to file
-        
-        Args:
-            prompt: Image generation prompt
-            index: Image index
-            length: Total number of images
-            output_dir: Optional output directory (defaults to contents/images)
-        """
-        try:
-            # Rate limiting
-            current_time = time.time()
-            if current_time - self.last_request_time < self.RATE_LIMIT_DELAY:
-                await asyncio.sleep(self.RATE_LIMIT_DELAY - (current_time - self.last_request_time))
-            
-            # Calculate dimensions based on format
-            width_steps = 64  # Base step size
-            height_steps = 64
-            
-            if self.current_format == "shorts":
-                width = 9 * width_steps   # 576 pixels (9:16 ratio)
-                height = 16 * height_steps # 1024 pixels
-            else:
-                width = 16 * width_steps  # 1024 pixels (16:9 ratio)
-                height = 9 * height_steps  # 576 pixels
-            
-
-            print(width, height)
-
-            
-            
-            print(f"Generating {self.current_format} format image {index + 1}/{length}")
-            
-            response = self.together_client.images.generate(
-                prompt=prompt,
-                model="black-forest-labs/FLUX.1-schnell-Free",
-                width=width,
-                height=height,
-                steps=4,
-                n=1,
-                response_format="b64_json"
-            )
-            
-            self.last_request_time = time.time()
-            
-            # Process and save the image
-            if response and hasattr(response, 'data') and len(response.data) > 0:
-                b64_json = response.data[0].b64_json
-                image_bytes = base64.b64decode(b64_json)
+        """Generate an image and save it to file"""
+        async with self.semaphore:  # Control concurrent API calls
+            try:
+                # Rate limiting
+                current_time = time.time()
+                if current_time - self.last_request_time < self.RATE_LIMIT_DELAY:
+                    await asyncio.sleep(self.RATE_LIMIT_DELAY - (current_time - self.last_request_time))
                 
-                # Convert bytes to PIL Image for proper saving
-                with Image.open(io.BytesIO(image_bytes)) as img:
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    # Resize to video dimensions if needed
-                    if img.size != (self.WIDTH, self.HEIGHT):
-                        img = img.resize((self.WIDTH, self.HEIGHT), Image.Resampling.LANCZOS)
-                    
-                    # Use provided output directory or default
-                    if not output_dir:
-                        output_dir = self.DEFAULT_OUTPUT_DIR
-                    output_dir = Path(output_dir)
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Save to file
-                    output_path = output_dir / f"frame_{index}.jpg"
-                    img.save(str(output_path), "JPEG", quality=95)
+                # Calculate dimensions based on format
+                width_steps = 64  # Base step size
+                height_steps = 64
                 
-                print(f"Successfully generated image {index + 1}")
-                return str(output_path)
-            else:
-                print(f"Error: Invalid response format from Together AI")
+                if self.current_format == "shorts":
+                    width = 9 * width_steps   # 576 pixels (9:16 ratio)
+                    height = 16 * height_steps # 1024 pixels
+                else:
+                    width = 16 * width_steps  # 1024 pixels (16:9 ratio)
+                    height = 9 * height_steps  # 576 pixels
+                
+                print(f"Generating {self.current_format} format image {index + 1}/{length}")
+                
+                response = self.together_client.images.generate(
+                    prompt=prompt,
+                    model="black-forest-labs/FLUX.1-schnell-Free",
+                    width=width,
+                    height=height,
+                    steps=4,
+                    n=1,
+                    response_format="b64_json"
+                )
+                
+                self.last_request_time = time.time()
+                
+                # Process and save the image
+                if response and hasattr(response, 'data') and len(response.data) > 0:
+                    return await self._process_and_save_image(
+                        response.data[0].b64_json,
+                        index,
+                        output_dir
+                    )
+                else:
+                    print(f"Error: Invalid response format from Together AI")
+                    return None
+                
+            except Exception as e:
+                print(f"Error generating image: {str(e)}")
                 return None
+
+    async def _process_and_save_image(self, b64_json: str, index: int, output_dir: str = None) -> str:
+        """Process and save image from base64 data"""
+        try:
+            image_bytes = base64.b64decode(b64_json)
+            
+            # Convert bytes to PIL Image for proper saving
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                # Resize to video dimensions if needed
+                if img.size != (self.WIDTH, self.HEIGHT):
+                    img = img.resize((self.WIDTH, self.HEIGHT), Image.Resampling.LANCZOS)
+                
+                # Use provided output directory or default
+                if not output_dir:
+                    output_dir = self.DEFAULT_OUTPUT_DIR
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save to file
+                output_path = output_dir / f"frame_{index}.jpg"
+                img.save(str(output_path), "JPEG", quality=95)
+            
+            print(f"Successfully generated image {index + 1}")
+            return str(output_path)
             
         except Exception as e:
-            print(f"Error generating image: {str(e)}")
+            print(f"Error processing image: {str(e)}")
             return None
 
     async def generate_images(self, prompts: list[str], output_dir: str = None) -> list[str]:
-        """
-        Generate all images and return their file paths
-        
-        Args:
-            prompts: List of image generation prompts
-            output_dir: Optional output directory (defaults to contents/images)
-        """
+        """Generate all images in parallel batches"""
         image_paths = []
         
-        for i, prompt in enumerate(prompts):
-            image_path = await self.generate_image(prompt, i, len(prompts), output_dir)
-            if image_path:
-                image_paths.append(image_path)
+        # Process prompts in batches
+        for i in range(0, len(prompts), self.BATCH_SIZE):
+            batch_prompts = prompts[i:i + self.BATCH_SIZE]
+            batch_tasks = [
+                self.generate_image(
+                    prompt,
+                    i + idx,
+                    len(prompts),
+                    output_dir
+                )
+                for idx, prompt in enumerate(batch_prompts)
+            ]
+            
+            # Process batch in parallel
+            batch_results = await asyncio.gather(*batch_tasks)
+            image_paths.extend([path for path in batch_results if path])
         
         return image_paths
 

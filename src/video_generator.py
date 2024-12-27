@@ -23,9 +23,7 @@ from together import Together
 from proglog import ProgressBarLogger
 from difflib import SequenceMatcher
 import tempfile
-import vosk
-import soundfile as sf
-
+import whisper
 import torch
 from pydub import AudioSegment
 import ssl
@@ -456,39 +454,38 @@ class VideoGenerator:
         return new_clip
 
     async def get_speech_to_text_segments(self, audio_path: str) -> list[dict]:
-        """Get text segments with precise timings using Vosk speech-to-text"""
+        """Get text segments with precise timings using Whisper speech-to-text"""
         try:
-            print("Loading Vosk model...")
+            print("Loading Whisper model...")
+            model = whisper.load_model("medium")  # Using medium model for better accuracy
             
-            # Convert audio to wav format if needed
-            wav_path = audio_path
-            if not audio_path.endswith('.wav'):
-                wav_path = audio_path.rsplit('.', 1)[0] + '.wav'
-                audio = AudioSegment.from_file(audio_path)
-                audio.export(wav_path, format='wav')
+            # First detect the language
+            print("Detecting language...")
+            audio = whisper.load_audio(audio_path)
+            audio = whisper.pad_or_trim(audio)
+            mel = whisper.log_mel_spectrogram(audio).to(model.device)
+            _, probs = model.detect_language(mel)
+            detected_lang = max(probs, key=probs.get)
+            print(f"Detected language: {detected_lang}")
             
-            # Load audio file
-            wf = sf.SoundFile(wav_path)
+            # Set force language based on detection
+            force_language = None
+            if detected_lang == "vi":
+                force_language = "vi"
+            elif detected_lang in ["en", "en-US", "en-GB"]:
+                force_language = "en"
             
-            # Initialize Vosk model
-            if not os.path.exists("model"):
-                print("Downloading Vosk model...")
-                import urllib.request
-                urllib.request.urlretrieve(
-                    "https://alphacephei.com/vosk/models/vosk-model-vn-0.4.zip",
-                    "model.zip"
-                )
-                import zipfile
-                with zipfile.ZipFile("model.zip", 'r') as zip_ref:
-                    zip_ref.extractall(".")
-                os.remove("model.zip")
-                os.rename("vosk-model-vn-0.4", "model")
+            print(f"Transcribing audio in {force_language if force_language else 'auto'} mode...")
+            result = model.transcribe(
+                audio_path,
+                word_timestamps=True,
+                language=force_language,
+                task="transcribe",
+                condition_on_previous_text=True,
+                initial_prompt=f"This is a {force_language} language video." if force_language else None
+            )
             
-            model = vosk.Model("model")
-            rec = vosk.KaldiRecognizer(model, wf.samplerate)
-            rec.SetWords(True)  # Enable word timing
-            
-            # Process audio in chunks
+            # Process segments to combine words into phrases
             segments = []
             current_segment = {
                 'words': [],
@@ -497,64 +494,55 @@ class VideoGenerator:
             }
             word_count = 0
             
-            while True:
-                # Read audio data as numpy array
-                data = wf.read(4000, dtype='int16')
-                if len(data) == 0:
-                    break
-                
-                # Convert numpy array to bytes
-                data_bytes = data.tobytes()
-                
-                if rec.AcceptWaveform(data_bytes):
-                    result = json.loads(rec.Result())
-                    if result.get('result'):
-                        for word_data in result['result']:
-                            word = word_data['word'].strip()
-                            if not word:
-                                continue
-                            
-                            # Start new segment if needed
-                            if current_segment['start'] is None:
-                                current_segment['start'] = word_data['start']
-                            
-                            current_segment['words'].append(word)
-                            word_count += 1
-                            current_segment['end'] = word_data['end']
-                            
-                            # Check if we should create a new segment
-                            should_segment = (
-                                word_count >= 9 or  # Target 9-10 words per segment
-                                word.endswith(('.', '!', '?')) or  # End of sentence
-                                (word_count >= 7 and word.endswith((',', ';', ':'))) or  # Natural break point
-                                word_count >= 10  # Force break at 10 words
-                            )
-                            
-                            if should_segment and current_segment['words']:
-                                # Join words and clean up spacing
-                                text = ' '.join(current_segment['words'])
-                                # Clean up spacing around punctuation
-                                text = re.sub(r'\s+([.,!?;:])', r'\1', text)
-                                # Normalize spaces
-                                text = ' '.join(text.split())
-                                
-                                segments.append({
-                                    'word': text,
-                                    'start': current_segment['start'],
-                                    'end': current_segment['end'],
-                                    'duration': current_segment['end'] - current_segment['start']
-                                })
-                                
-                                # Reset for next segment
-                                current_segment = {
-                                    'words': [],
-                                    'start': None,
-                                    'end': None
-                                }
-                                word_count = 0
+            # Process each word with its timing
+            for segment in result["segments"]:
+                for word_data in segment["words"]:
+                    word = word_data["word"].strip()
+                    if not word:
+                        continue
+                        
+                    # Start new segment if needed
+                    if current_segment['start'] is None:
+                        current_segment['start'] = word_data["start"]
+                    
+                    current_segment['words'].append(word)
+                    word_count += 1
+                    current_segment['end'] = word_data["end"]
+                    
+                    # Check if we should create a new segment
+                    should_segment = (
+                        word_count >= 9 or  # Target 9-10 words per segment
+                        word.endswith(('.', '!', '?')) or  # End of sentence
+                        (word_count >= 7 and word.endswith((',', ';', ':'))) or  # Natural break point
+                        word_count >= 10  # Force break at 10 words
+                    )
+                    
+                    if should_segment and current_segment['words']:
+                        # Join words and clean up spacing
+                        text = ' '.join(current_segment['words'])
+                        # Clean up spacing around punctuation
+                        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+                        # Normalize spaces
+                        text = ' '.join(text.split())
+                        
+                        segments.append({
+                            'word': text,
+                            'start': current_segment['start'],
+                            'end': current_segment['end'],
+                            'duration': current_segment['end'] - current_segment['start']
+                        })
+                        
+                        # Reset for next segment
+                        current_segment = {
+                            'words': [],
+                            'start': None,
+                            'end': None
+                        }
+                        word_count = 0
             
             # Add any remaining words
             if current_segment['words']:
+                # Clean up final segment
                 text = ' '.join(current_segment['words'])
                 text = re.sub(r'\s+([.,!?;:])', r'\1', text)
                 text = ' '.join(text.split())
@@ -566,14 +554,21 @@ class VideoGenerator:
                     'duration': current_segment['end'] - current_segment['start']
                 })
             
-            # Clean up temporary wav file if created
-            if wav_path != audio_path:
-                os.remove(wav_path)
+            # Post-process segments to ensure consistent language
+            if segments:
+                # Add small gaps between segments for readability
+                for i in range(len(segments) - 1):
+                    gap = min(0.1, (segments[i+1]['start'] - segments[i]['end']) / 2)
+                    segments[i]['end'] -= gap
+                    segments[i+1]['start'] += gap
+                    segments[i]['duration'] = segments[i]['end'] - segments[i]['start']
+                    segments[i+1]['duration'] = segments[i+1]['end'] - segments[i+1]['start']
             
             return segments
             
         except Exception as e:
             print(f"Error in speech-to-text transcription: {str(e)}")
+            traceback.print_exc()
             return []
 
     async def generate_video(

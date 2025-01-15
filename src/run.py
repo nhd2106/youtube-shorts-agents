@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import asyncio
-import os
 from dotenv import load_dotenv
 from content_generator import ContentGenerator
 

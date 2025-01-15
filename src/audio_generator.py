@@ -1,4 +1,3 @@
-import os
 import edge_tts
 import asyncio
 from gtts import gTTS
@@ -6,8 +5,7 @@ from openai import OpenAI
 from pathlib import Path
 import hashlib
 import json
-from elevenlabs.client import ElevenLabs
-
+from elevenlabs import ElevenLabs
 
 class AudioGenerator:
     AVAILABLE_MODELS = {
@@ -26,10 +24,10 @@ class AudioGenerator:
             "default_voice": "echo",
             "voices": ["echo", "alloy", "fable", "onyx", "nova", "shimmer"]
         },
-        "elevenlabs": { 
+        "elevenlabs": {
             "name": "ElevenLabs",
-            "default_voice": "Bella",
-            "voices": ["Bella", "Luna", "Vito"]
+            "default_voice": "t1LUnfTt7pXaYjubT04d",
+            "voices": ["t1LUnfTt7pXaYjubT04d","WVkYyTxxVgMOsw1IIVL0", "7hsfEc7irDn6E8br0qfw"]
         }
     }
 
@@ -37,7 +35,20 @@ class AudioGenerator:
         self.cache_dir = Path("contents/cache/audio")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.openai_client = None
+        self.elevenlabs_client = None
         self.semaphore = asyncio.Semaphore(3)  # Limit concurrent API calls
+
+    def _init_openai_client(self, api_key: str):
+        """Initialize OpenAI client with API key"""
+        if not api_key:
+            raise ValueError("OpenAI API key is required for OpenAI TTS")
+        self.openai_client = OpenAI(api_key=api_key)
+
+    def _init_elevenlabs_client(self, api_key: str):
+        """Initialize ElevenLabs client with API key"""
+        if not api_key:
+            raise ValueError("ElevenLabs API key is required for ElevenLabs TTS")
+        self.elevenlabs_client = ElevenLabs(api_key=api_key)
 
     def get_available_models(self) -> dict:
         """Return available TTS models and their voices"""
@@ -63,7 +74,8 @@ class AudioGenerator:
         filename: str,
         model: str = "edge",
         voice: str = None,
-        output_dir: str = None
+        output_dir: str = None,
+        api_keys: dict = None
     ) -> str:
         """Generate audio file from script with caching"""
         try:
@@ -115,8 +127,9 @@ class AudioGenerator:
                     tts = gTTS(text=script, lang='vi')
                     tts.save(str(output_path))
                 elif model == "openai":
-                    if not self.openai_client:
-                        self.openai_client = OpenAI()
+                    if not api_keys or not api_keys.get('openai'):
+                        raise ValueError("OpenAI API key is required for OpenAI TTS")
+                    self._init_openai_client(api_keys['openai'])
                     response = self.openai_client.audio.speech.create(
                         model="tts-1",
                         voice=voice,
@@ -125,16 +138,25 @@ class AudioGenerator:
                     )
                     response.stream_to_file(str(output_path))
                 elif model == "elevenlabs":
-                    client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-                    audio = client.generate(
+                    if not api_keys or not api_keys.get('elevenlabs'):
+                        raise ValueError("ElevenLabs API key is required for ElevenLabs TTS")
+                    self._init_elevenlabs_client(api_keys['elevenlabs'])
+                    audio_stream = self.elevenlabs_client.text_to_speech.convert(
                         text=script,
-                        voice=voice,
-                        model="eleven_flash_v2_5",
-                        stream=True
+                        voice_id=voice,
+                        model_id="eleven_turbo_v2_5",
+                        output_format="mp3_22050_32"
                     )
-                    with open(output_path, "wb") as f:
-                        for chunk in audio:
-                            f.write(chunk)  
+                    
+                    # Save the streaming response to the output file
+                    with open(output_path, 'wb') as audio_file:
+                        for chunk in audio_stream:
+                            audio_file.write(chunk)
+                
+                # Check if file was generated
+                if not output_path.exists():
+                    raise RuntimeError("Audio generation failed")
+                
                 # Cache the generated audio
                 import shutil
                 shutil.copy2(output_path, cache_path)

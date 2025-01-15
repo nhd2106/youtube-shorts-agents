@@ -11,7 +11,6 @@ from src.audio_generator import AudioGenerator
 from src.video_generator import VideoGenerator
 from src.image_handler import ImageHandler
 from src.request_tracker import RequestTracker, RequestStatus
-from src.youtube_uploader import YouTubeUploader
 import time
 from datetime import datetime
 import threading
@@ -26,7 +25,6 @@ audio_generator = AudioGenerator()
 video_generator = VideoGenerator()
 image_handler = ImageHandler()
 request_tracker = RequestTracker()
-youtube_uploader = YouTubeUploader()
 
 # Start background task to clean old requests
 def clean_old_requests():
@@ -59,6 +57,7 @@ def generate() -> tuple[Any, int]:
         video_format: str = data.get('format', 'shorts')
         tts_model: str = data.get('tts_model', 'edge')
         voice: str = data.get('voice', None)
+        api_keys: Dict[str, str] = data.get('api_keys', {})
         
         if not idea:
             return jsonify({'error': 'Video idea is required'}), 400
@@ -91,7 +90,8 @@ def generate() -> tuple[Any, int]:
                 idea=idea,
                 video_format=video_format,
                 tts_model=tts_model,
-                voice=voice
+                voice=voice,
+                api_keys=api_keys
             ))
             loop.close()
             
@@ -147,6 +147,7 @@ def prepare_video_data() -> tuple[Any, int]:
         video_format = data.get('video_format', 'shorts')
         tts_model = data.get('tts_model', 'edge')
         voice = data.get('voice')
+        api_keys = data.get('api_keys', {})
 
         if not idea:
             return jsonify({'error': 'No idea provided'}), 400
@@ -157,23 +158,25 @@ def prepare_video_data() -> tuple[Any, int]:
         # Set initial status
         request_tracker.update_request(request_id, status=RequestStatus.PENDING)
 
-        # Generate content
-        content = content_generator.generate(idea)
+        # Generate content with API keys
+        content = content_generator.generate(idea, api_keys=api_keys)
         request_tracker.update_request(request_id, status=RequestStatus.GENERATING_CONTENT)
 
-        # Generate audio
+        # Generate audio with API keys
         audio_path = audio_generator.generate(
             content['script'],
             request_id,
             tts_model=tts_model,
-            voice=voice
+            voice=voice,
+            api_keys=api_keys
         )
         request_tracker.update_request(request_id, status=RequestStatus.GENERATING_AUDIO)
 
-        # Generate images
+        # Generate images with API keys
         background_images = image_handler.generate_background_images(
             content['image_prompts'],
-            request_id
+            request_id,
+            api_keys=api_keys
         )
         request_tracker.update_request(request_id, status=RequestStatus.GENERATING_IMAGES)
 
@@ -255,56 +258,13 @@ def download_file(request_id: str, content_type: str, filename: str) -> Any:
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/upload/youtube/<request_id>', methods=['POST'])
-async def upload_to_youtube(request_id: str) -> tuple[Any, int]:
-    """Upload a generated video to YouTube"""
-    try:
-        # Get request data
-        request_data = request_tracker.get_request(request_id)
-        if not request_data:
-            return jsonify({'error': 'Request not found'}), 404
-
-        if request_data['status'] != 'completed':
-            return jsonify({'error': 'Video generation not completed'}), 400
-
-        # Get video details from request
-        data = request.get_json()
-        title = data.get('title')
-        description = data.get('description')
-        tags = data.get('tags', [])
-        privacy_status = data.get('privacy_status', 'private')
-
-        if not title or not description:
-            return jsonify({'error': 'Title and description are required'}), 400
-
-        # Get video path from request result
-        video_filename = request_data['result']['video']['filename']
-        video_path = os.path.join(get_request_directory(request_id, 'video'), video_filename)
-
-        if not os.path.exists(video_path):
-            return jsonify({'error': 'Video file not found'}), 404
-
-        # Upload to YouTube
-        upload_result = await youtube_uploader.upload_video(
-            video_path=video_path,
-            title=title,
-            description=description,
-            tags=tags,
-            is_shorts=request_data['result']['metadata']['format'] == 'shorts',
-            privacy_status=privacy_status
-        )
-
-        return jsonify(upload_result), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 async def generate_content_video(
     request_id: str,
     idea: str,
     video_format: str = 'shorts',
     tts_model: str = 'edge',
-    voice: str = None
+    voice: str = None,
+    api_keys: Dict[str, str] = None
 ) -> None:
     """Generate content and video based on idea and parameters"""
     try:
@@ -329,8 +289,8 @@ async def generate_content_video(
             progress=10
         )
         
-        # Generate content with format
-        content = await content_generator.generate_content(idea, video_format)
+        # Generate content with format and API keys
+        content = await content_generator.generate_content(idea, video_format, api_keys)
         
         # Start all generation tasks in parallel
         audio_filename = f"{request_id}_audio"
@@ -338,16 +298,17 @@ async def generate_content_video(
         
         # Create all tasks at once
         tasks = [
-            # Audio generation task
+            # Audio generation task with API keys
             audio_generator.generate_audio(
                 script=content['script'],
                 filename=audio_filename,
                 model=tts_model,
                 voice=voice,
-                output_dir=dirs[0]  # audio dir
+                output_dir=dirs[0],  # audio dir
+                api_keys=api_keys
             ),
-            # Image prompts generation task
-            video_generator.generate_prompts_with_openai(content['script']),
+            # Image prompts generation task with API keys
+            video_generator.generate_prompts_with_openai(content['script'], api_keys),
         ]
         
         # Update status for parallel processing
@@ -367,11 +328,44 @@ async def generate_content_video(
             progress=40
         )
         
-        # Generate images
-        image_paths = await image_handler.generate_images(
-            prompts,
-            output_dir=dirs[1]  # images dir
-        )
+        # Calculate required number of images based on video format
+        required_images = 9 if video_format == "shorts" else 18
+        
+        # Process extracted images from URL if available
+        image_paths = []
+        if content.get('image_urls'):
+            print(f"Processing {len(content['image_urls'])} extracted images from URL")
+            # Download and process extracted images
+            for url in content['image_urls']:
+                try:
+                    image_path = await image_handler.download_and_process_image(
+                        url,
+                        output_dir=dirs[1]  # images dir
+                    )
+                    if image_path:
+                        image_paths.append(image_path)
+                except Exception as e:
+                    print(f"Error processing image from URL {url}: {str(e)}")
+                    continue
+        
+        # Generate additional images only if we don't have enough extracted images
+        if len(image_paths) < required_images and not content.get('image_urls'):
+            print(f"Not enough extracted images ({len(image_paths)}), generating {required_images - len(image_paths)} additional images")
+            # Use a subset of prompts based on remaining count
+            selected_prompts = prompts[:required_images - len(image_paths)]
+            additional_images = await image_handler.generate_background_images(
+                selected_prompts,
+                request_id,
+                output_dir=dirs[1],  # images dir
+                api_keys=api_keys
+            )
+            image_paths.extend(additional_images)
+        else:
+            print(f"Using {len(image_paths)} extracted images, skipping AI image generation")
+            # If we have more images than needed, use only the required number
+            if len(image_paths) > required_images:
+                print(f"Using only the first {required_images} images")
+                image_paths = image_paths[:required_images]
         
         # Verify audio file exists before proceeding
         if not os.path.exists(audio_path):

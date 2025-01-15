@@ -4,16 +4,19 @@ import traceback
 import numpy as np
 from PIL import Image
 from pathlib import Path
-from typing import  List, Dict, Any
+from typing import List, Dict, Any
+from openai import AsyncOpenAI
 
-import numpy as np
-from moviepy.editor import *
-from moviepy.video.VideoClip import ColorClip, TextClip
+# MoviePy imports
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.video.VideoClip import VideoClip, ColorClip, TextClip, ImageClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.video.compositing.CompositeVideoClip import concatenate_videoclips
+from moviepy import vfx
 
-from moviepy.editor import AudioFileClip, TextClip, CompositeVideoClip, ImageClip, ColorClip, vfx, VideoClip, VideoFileClip
-from moviepy.config import change_settings
+
 import re
-import openai
 from proglog import ProgressBarLogger
 import whisper
 import ssl
@@ -60,15 +63,6 @@ class VideoGenerator:
         self.WIDTH = None
         self.HEIGHT = None
         
-        # Set ImageMagick binary path for MoviePy
-        if os.path.exists('/opt/homebrew/bin/convert'):
-            change_settings({"IMAGEMAGICK_BINARY": "/opt/homebrew/bin/convert"})
-        elif os.path.exists('/usr/local/bin/convert'):
-            change_settings({"IMAGEMAGICK_BINARY": "/usr/local/bin/convert"})
-        elif os.path.exists('/usr/bin/convert'):
-            change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
-
-
         # Patch MoviePy's resize function to use Lanczos
         self._patch_moviepy_resize()
 
@@ -78,11 +72,16 @@ class VideoGenerator:
         os.makedirs(self.DEFAULT_TEMP_DIR, exist_ok=True)
 
     def _patch_moviepy_resize(self):
-        """Patch MoviePy's resize function to use Lanczos instead of ANTIALIAS"""
-        from moviepy.video.fx.resize import resize
+        """Patch MoviePy's resize function to use Lanczos"""
+        from moviepy.video.fx.Resize import Resize
         from functools import wraps
 
-        @wraps(resize)
+        def transform_frame(frame, w, h):
+            if frame.shape[0:2] == (h, w):
+                return frame
+            return np.array(Image.fromarray(frame).resize((w, h), Image.Resampling.LANCZOS))
+
+        @wraps(Resize)
         def new_resize(clip, newsize=None, height=None, width=None, apply_to_mask=True):
             if newsize is not None:
                 w, h = newsize
@@ -95,21 +94,14 @@ class VideoGenerator:
             else:
                 return clip
 
-            def transform_frame(get_frame, t):
-                frame = get_frame(t)
-                if frame.shape[0:2] == (h, w):
-                    return frame
-                resized = np.array(Image.fromarray(frame).resize((w, h), Image.Resampling.LANCZOS))
-                return resized
-
-            new_clip = clip.transform(transform_frame, apply_to_mask=apply_to_mask)
+            new_clip = clip.transform(lambda frame: transform_frame(frame, w, h), apply_to_mask=apply_to_mask)
             new_clip.w = w
             new_clip.h = h
             return new_clip
 
         # Patch the resize function
-        import moviepy.video.fx.resize
-        moviepy.video.fx.resize.resize = new_resize
+        import moviepy.video.fx.Resize as fx_resize
+        fx_resize.resize = new_resize
 
     def split_into_phrases(self, text: str) -> list[str]:
         """Split text into natural phrases using punctuation"""
@@ -161,53 +153,56 @@ class VideoGenerator:
             
             # Create the main text clip
             txt_clip = TextClip(
-                text,
-                font='Arial-Bold',
-                fontsize=fontsize,
-                color='yellow',  # Changed to yellow
+                font="/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                text=text,
+                font_size=fontsize,
+                color='yellow',
                 stroke_color='black',
                 stroke_width=2,
-                size=(self.WIDTH * 0.7, None),
+                size=(int(self.WIDTH * 0.7), None),
                 method='caption',
-                align='center'
-            )
+                text_align='center'
+            ).with_duration(duration)
             
-            # Create background for text with padding
-            padding = 20  # Pixels of padding around text
-            bg_width = txt_clip.w + (padding * 2)
-            bg_height = txt_clip.h + (padding * 2)
+            # Create background with padding
+            padding = 20
+            bg_width = self.WIDTH  # Full video width
+            bg_height = int(txt_clip.h + (padding * 2))
             
-            # Create background clip with opacity
-            bg_clip = ColorClip(
-                size=(bg_width, bg_height),
-                color=(0, 0, 0)
-            ).set_opacity(0.7)
+            # Create background array with alpha channel
+            bg_array = np.zeros((bg_height, bg_width, 4), dtype=np.uint8)
+            bg_array[..., :3] = 0  # RGB black
+            bg_array[..., 3] = int(0.7 * 255)  # Alpha channel at 70% opacity
             
-            # Compose text and background
-            txt_clip = txt_clip.set_position((padding, padding))  # Center text in background
+            # Create background clip
+            bg_clip = ImageClip(bg_array).with_duration(duration)
+            
+            # Position text in center
+            txt_clip = txt_clip.with_position('center')
+            
+            # Create text with background
             composed_clip = CompositeVideoClip(
-                [bg_clip, txt_clip],
+                clips=[bg_clip, txt_clip],
                 size=(bg_width, bg_height)
-            )
-            
+            ).with_duration(duration)
+
             # Position at the bottom with padding
-            bottom_padding = self.HEIGHT * 0.15  # 15% from bottom
-            composed_clip = composed_clip.set_position(('center', self.HEIGHT - bottom_padding - bg_height))
-            
-            # Set timing
-            composed_clip = composed_clip.set_start(start_time)
-            composed_clip = composed_clip.set_duration(duration)
+            bottom_padding = int(self.HEIGHT * 0.15)  # 15% from bottom
+            composed_clip = composed_clip.with_position(
+                ('center', self.HEIGHT - bottom_padding - bg_height)
+            ).with_start(start_time)
             
             # Add fade effects
             fade_duration = min(0.3, duration * 0.15)  # 15% of duration or 0.3s, whichever is shorter
-            composed_clip = composed_clip.crossfadein(fade_duration)
-            composed_clip = composed_clip.crossfadeout(fade_duration)
+            composed_clip = composed_clip.with_effects([
+                vfx.CrossFadeIn(duration=fade_duration),
+                vfx.CrossFadeOut(duration=fade_duration)
+            ])
             
             return composed_clip
             
         except Exception as e:
             print(f"Error creating text clip: {str(e)}")
-            import traceback
             traceback.print_exc()
             return None
 
@@ -322,10 +317,10 @@ class VideoGenerator:
             img = img.crop((x1, y1, x2, y2))
             return np.array(img)
         
-        new_clip = VideoClip(make_frame, duration=duration)
-        new_clip = new_clip.set_duration(duration)
-        new_clip = new_clip.fadein(duration * 0.05)
-        new_clip = new_clip.fadeout(duration * 0.05)
+        # Create new clip with duration using v2 syntax
+        new_clip = VideoClip(frame_function=make_frame, duration=duration)
+        new_clip = new_clip.with_duration(duration)
+        new_clip = new_clip.with_effects([vfx.FadeIn(duration=duration * 0.05), vfx.FadeOut(duration=duration * 0.05)])
         
         return new_clip
 
@@ -347,9 +342,10 @@ class VideoGenerator:
                     # Convert to numpy array
                     img_array = np.array(img)
                 
-                # Create base clip from numpy array
-                base_clip = ImageClip(img_array)
-                base_clip = base_clip.set_duration(duration)
+                # Create base clip from numpy array with duration
+                from moviepy.video.VideoClip import ImageClip
+                base_clip = ImageClip(img_array, duration=duration)
+                base_clip = base_clip.with_duration(duration)
                 
                 # Apply transitions with error handling
                 try:
@@ -377,8 +373,12 @@ class VideoGenerator:
             except Exception as e:
                 print(f"Error creating clip {i + 1}: {str(e)}")
                 # Create a fallback clip if image processing fails
-                fallback_clip = ColorClip(size=(self.WIDTH, self.HEIGHT), 
-                                        color=(0, 0, 0)).set_duration(duration)
+                from moviepy.video.VideoClip import ColorClip
+                fallback_clip = ColorClip(
+                    size=(self.WIDTH, self.HEIGHT),
+                    color=(0, 0, 0),
+                    duration=duration
+                )
                 clips.append(fallback_clip)
                 continue
         
@@ -432,10 +432,10 @@ class VideoGenerator:
             img = img.crop((x1, y1, x2, y2))
             return np.array(img)
         
-        new_clip = VideoClip(make_frame, duration=duration)
-        new_clip = new_clip.set_duration(duration)
-        new_clip = new_clip.fadein(duration * 0.05)
-        new_clip = new_clip.fadeout(duration * 0.05)
+        # Create new clip with duration using v2 syntax
+        new_clip = VideoClip(frame_function=make_frame, is_mask=False, duration=duration)
+        
+        new_clip = new_clip.with_effects([vfx.FadeIn(duration=duration * 0.05), vfx.FadeOut(duration=duration * 0.05)])
         
         return new_clip
 
@@ -443,7 +443,7 @@ class VideoGenerator:
         """Get text segments with precise timings using Whisper speech-to-text"""
         try:
             print("Loading Whisper model...")
-            model = whisper.load_model("small")  # Using medium model for better accuracy
+            model = whisper.load_model("medium")  # Using medium model for better accuracy
             
             # First detect the language
             print("Detecting language...")
@@ -587,82 +587,87 @@ class VideoGenerator:
             # Load and preprocess audio
             print("Loading and preprocessing audio...")
             audio = AudioFileClip(audio_path)
-            
-            # Normalize audio and ensure consistent format
-            audio = audio.set_fps(44100)  # Standard audio sampling rate
-            audio = audio.set_duration(audio.duration)  # Ensure duration is set correctly
-            
             self.DURATION = audio.duration
             print(f"Audio duration: {self.DURATION}")
 
-            # Get speech-to-text segments with precise timings
+            # Get speech-to-text segments
             print("\nGetting speech-to-text segments...")
-            phrase_timings = await self.get_speech_to_text_segments(audio_path)
+            phrase_timings = await self.get_precise_word_timings(audio_path, content['script'])
             if not phrase_timings:
                 print("Falling back to script-based timing...")
-                phrase_timings = await self.get_precise_word_timings(audio_path, content['script'])
             print(f"Generated {len(phrase_timings)} phrase timings")
 
-            # Calculate durations for background clips
-            print("\nCalculating clip durations...")
+            # Create background
+            print("\nCreating background...")
             if background_images and len(background_images) > 0:
                 num_images = len(background_images)
                 segment_duration = self.DURATION / num_images
                 durations = [segment_duration] * num_images
                 print(f"Using {num_images} images with {segment_duration:.2f}s each")
 
-                # Create background clips from image paths
-                print("\nCreating background clips...")
-                print(f"Using provided background images... (count: {len(background_images)})")
                 background_clips = self._create_background_clips(background_images, durations)
                 if not background_clips:
                     raise ValueError("Failed to create background clips")
                 
-                # Concatenate background clips
-                background = concatenate_videoclips(background_clips, method="compose")
+                # Concatenate background clips with compose method
+                background = concatenate_videoclips(
+                    background_clips,
+                    method="compose",
+                )
             else:
                 print("No background images provided, using solid color...")
                 background = ColorClip(
                     size=(self.WIDTH, self.HEIGHT),
-                    color=(0, 0, 0)
-                ).set_duration(self.DURATION)
+                    color=(0, 0, 0),
+                    duration=self.DURATION
+                )
 
             # Create text clips
             print("\nCreating text clips...")
             text_clips = []
             
-            # Create and add title clip first - make it last the entire video
+            # Create and add title clip
             print("\nCreating title clip...")
-            title_clip = self.create_title_clip(content['title'], self.DURATION)  # Show title for entire video
+            title_clip = self.create_title_clip(content['title'], self.DURATION)
             if title_clip:
-                # Position title at the top of the video
-                title_clip = title_clip.set_position(('center', self.HEIGHT // 6))  # 1/5 from top
                 text_clips.append(title_clip)
-                print(f"Added title clip: {content['title']} (duration: {self.DURATION}s)")
+                print(f"Added title clip: {content['title']}")
             
             # Add subtitle clips
             print("\nCreating subtitle clips...")
             for timing in phrase_timings:
+                print(f"Creating clip for text: {timing['word']}")
+                print(f"Start: {timing['start']}, Duration: {timing['duration']}")
+                
                 clip = self.create_text_clip(
                     timing['word'],
                     start_time=timing['start'],
                     duration=timing['duration']
                 )
+                
                 if clip:
                     text_clips.append(clip)
-                    print(f"Added subtitle clip for: {timing['word']}")
+                    print(f"Added subtitle clip: {timing['word']}")
+                else:
+                    print(f"Failed to create clip for: {timing['word']}")
 
-            print(f"\nCreated {len(text_clips)} text clips (including title)")
+            print(f"\nCreated {len(text_clips)} text clips")
             
             # Create final composition
             print("\nCreating final composition...")
-            clips = [background] + text_clips
-            print(f"Total clips to compose: {len(clips)}")
-
-            final = CompositeVideoClip(clips, size=(self.WIDTH, self.HEIGHT))
-            final = final.set_duration(self.DURATION)
+            # First create a composite of all text clips
+            text_composite = CompositeVideoClip(
+                text_clips,
+                size=(self.WIDTH, self.HEIGHT)
+            ).with_duration(self.DURATION)
             
-            # Write audio to temporary file first
+            # Then combine background with text composite
+            final = CompositeVideoClip(
+                [background, text_composite],
+                size=(self.WIDTH, self.HEIGHT)
+            ).with_duration(self.DURATION)
+
+            # Add audio
             print("\nPreprocessing audio...")
             audio.write_audiofile(
                 str(temp_audio_path),
@@ -673,9 +678,8 @@ class VideoGenerator:
                 ffmpeg_params=["-strict", "-2"]
             )
             
-            # Load preprocessed audio
             processed_audio = AudioFileClip(str(temp_audio_path))
-            final = final.set_audio(processed_audio)
+            final = final.with_audio(processed_audio)
 
             # Write final video
             print(f"\nWriting video to: {video_path}")
@@ -732,26 +736,33 @@ class VideoGenerator:
         fontsize = 62 if self.current_format == "shorts" else 50  # Reduced from 90/72
         
         text_clip = TextClip(
-            text,
-            font='Arial-Bold',
-            fontsize=fontsize,
+            font="/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            text=text,
+            font_size=fontsize,
             color='yellow',
-            size=(self.WIDTH - 250, None),
-            method='caption',
-            align='center',
             stroke_color='yellow',
-            stroke_width=3
-        )
+            stroke_width=3,
+            size=(int(self.WIDTH - 100), None),
+            method='caption',
+            text_align='center'
+        ).with_duration(duration)
         
-        # Create solid color background
-        bg = ColorClip(
-            size=(text_clip.w + 60, text_clip.h + 60),
-            color=(0, 0, 50)
-        ).set_opacity(0.8)
+        # Create background with padding
+        padding = 30
+        bg_width = self.WIDTH  # Full video width
+        bg_height = int(text_clip.h + (padding * 2))
         
-        # Add glow effect without resize
+        # Create background array with alpha channel
+        bg_array = np.zeros((bg_height, bg_width, 4), dtype=np.uint8)
+        bg_array[..., :3] = [0, 0, 50]  # RGB dark blue
+        bg_array[..., 3] = int(0.7 * 255)  # Alpha channel at 70% opacity
+        
+        # Create background clip
+        bg = ImageClip(bg_array).with_duration(duration)
+        
+        # Add glow effect
         glow = text_clip.copy()
-        glow = glow.set_opacity(0.4)
+        glow = glow.with_opacity(0.4)
         
         # Calculate center position
         center_pos = ('center', 'center')
@@ -760,38 +771,46 @@ class VideoGenerator:
         def offset_position(x_offset=0, y_offset=0):
             return lambda t: (
                 'center',
-                'center' if y_offset == 0 else self.HEIGHT//2 + y_offset
+                'center' if y_offset == 0 else int(self.HEIGHT//2 + y_offset)
             )
         
         # Composite with animations - layer multiple glows with different offsets
-        final_clip = CompositeVideoClip([
-            bg.set_position(center_pos),
-            glow.set_position(offset_position(y_offset=-2)),  # Up
-            glow.set_position(offset_position(y_offset=2)),   # Down
-            glow.set_position(offset_position()),             # Center
-            text_clip.set_position(center_pos)
-        ])
+        final_clip = CompositeVideoClip(
+            clips=[
+                bg.with_position(center_pos),
+                glow.with_position(offset_position(y_offset=-2)),  # Up
+                glow.with_position(offset_position(y_offset=2)),   # Down
+                glow.with_position(offset_position()),             # Center
+                text_clip.with_position(center_pos)
+            ],
+            size=(bg_width, bg_height)
+        ).with_duration(duration)
         
         # Add title-specific animations
-        final_clip = final_clip.set_duration(duration)
-        final_clip = final_clip.fadein(1.0)
-        final_clip = final_clip.fadeout(1.0)
+        final_clip = final_clip.with_effects([
+            vfx.CrossFadeIn(duration=1.0),
+            vfx.CrossFadeOut(duration=1.0)
+        ])
         
         # Update floating effect position to 1/6 from top
         float_amount = 8
-        final_clip = final_clip.set_position(
-            lambda t: ('center', self.HEIGHT * 1/6 + float_amount * math.sin(2 * math.pi * t / 4))
+        final_clip = final_clip.with_position(
+            lambda t: ('center', int(self.HEIGHT * 1/6 + float_amount * math.sin(2 * math.pi * t / 4)))
         )
         
         return final_clip
 
-    async def generate_prompts_with_openai(self, script: str) -> List[str]:
+    async def generate_prompts_with_openai(self, script: str, api_keys: dict = None) -> List[str]:
         video_format = self.current_format
         """Generate image prompts using OpenAI"""
         try:
+            if not api_keys or not api_keys.get('openai'):
+                raise ValueError("OpenAI API key is required for prompt generation")
+
             prompt_count = "9-10" if video_format == "shorts" else "18-20"
             
-            response = await openai.AsyncOpenAI().chat.completions.create(
+            client = AsyncOpenAI(api_key=api_keys['openai'])
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {
@@ -803,7 +822,7 @@ class VideoGenerator:
                         3. Use these essential cinematography terms in your prompts:
                            - Camera angles: Low angle, High angle, Overhead, FPV (First Person View), Wide angle
                            - Camera aperture: f/1.4, f/2.8, f/4, f/5.6, f/8, f/11, f/16, f/22
-                           - Shutter speed: 1/250, 1/500, 1/1000, 1/2000
+                           - Camera shutter speed: 1/250, 1/500, 1/1000, 1/2000
                            - ISO: 100, 200, 400, 800, 1600, 3200
                            - Focal length: 10mm, 24mm, 35mm, 50mm, 85mm, 135mm, 200mm, 300mm
                            - Shot types: Close up, Medium shot, Wide shot, Macro
@@ -876,91 +895,6 @@ class VideoGenerator:
                 "Smooth transitions of cool tones with floating particles"
             ]
 
-    async def analyze_audio_waveform(self, audio_path: str) -> list[dict]:
-        """Analyze audio waveform to detect speech segments using multiple features"""
-        try:
-            # Load the audio file
-            y, sr = librosa.load(audio_path)
-            
-            # Get onset strength with adjusted parameters
-            onset_env = librosa.onset.onset_strength(
-                y=y, 
-                sr=sr,
-                hop_length=512,  # Smaller hop length for better precision
-                aggregate=np.median  # Use median for more stable detection
-            )
-            
-            # Get speech probability using RMS energy
-            S = np.abs(librosa.stft(y))
-            rms = librosa.feature.rms(S=S)[0]
-            rms_times = librosa.times_like(rms, sr=sr)
-            
-            # Normalize RMS
-            rms = (rms - rms.min()) / (rms.max() - rms.min())
-            
-            # Get pitch information
-            pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
-            pitch_times = librosa.times_like(pitches)
-            
-            # Detect speech onsets with adjusted parameters
-            onset_frames = librosa.onset.onset_detect(
-                onset_envelope=onset_env,
-                sr=sr,
-                wait=0.15,      # Minimum time between onset detections
-                pre_avg=0.15,   # Time for onset strength to rise
-                post_avg=0.15,  # Time for onset strength to fall
-                pre_max=0.05,   # Time for local max search
-                post_max=0.05,  # Time for local max search
-                delta=0.07,     # Minimum onset strength threshold
-                backtrack=True  # Find precise onset times
-            )
-            
-            # Convert frames to time
-            onset_times = librosa.frames_to_time(onset_frames, sr=sr)
-            
-            # Get audio duration
-            duration = librosa.get_duration(y=y, sr=sr)
-            
-            # Create segments considering both onsets and RMS energy
-            segments = []
-            for i in range(len(onset_times)):
-                start = onset_times[i]
-                # If it's the last onset, use audio duration as end
-                end = duration if i == len(onset_times) - 1 else onset_times[i + 1]
-                
-                # Get RMS energy for this segment
-                segment_rms = rms[(rms_times >= start) & (rms_times <= end)]
-                avg_energy = np.mean(segment_rms) if len(segment_rms) > 0 else 0
-                
-                # Only add segments with significant energy and minimum duration
-                if avg_energy > 0.2 and (end - start) >= 0.15:
-                    # Adjust segment boundaries based on energy
-                    start_idx = np.where(rms_times >= start)[0][0]
-                    end_idx = np.where(rms_times <= end)[0][-1]
-                    
-                    # Find the actual speech start/end within the segment
-                    while start_idx < len(rms) and rms[start_idx] < 0.2:
-                        start_idx += 1
-                    while end_idx > 0 and rms[end_idx] < 0.2:
-                        end_idx -= 1
-                    
-                    actual_start = rms_times[start_idx]
-                    actual_end = rms_times[end_idx]
-                    
-                    if actual_end - actual_start >= 0.15:  # Minimum segment duration
-                        segments.append({
-                            'start': actual_start,
-                            'end': actual_end,
-                            'duration': actual_end - actual_start,
-                            'energy': float(avg_energy)
-                        })
-            
-            return segments
-            
-        except Exception as e:
-            print(f"Error analyzing audio waveform: {str(e)}")
-            return []
-
     async def get_precise_word_timings(self, audio_path: str, subtitle_text: str) -> list[dict]:
         """Get precise word timings with adjustable speed factor"""
         try:
@@ -973,11 +907,11 @@ class VideoGenerator:
             y, sr = librosa.load(audio_path)
             total_duration = librosa.get_duration(y=y, sr=sr)
             
-            # Timing parameters - adjusted for better sync
-            SPEED_FACTOR = 1.0  # Normal speed (was 0.95)
-            BASE_WORD_DURATION = 0.3  # Slightly reduced base duration (was 0.35)
-            MIN_PHRASE_DURATION = 1.5  # Slightly reduced minimum duration (was 1.8)
-            GAP_DURATION = 0.15  # Slightly reduced gap (was 0.2)
+            # Timing parameters - adjusted for better readability
+            SPEED_FACTOR = 1  # Slower speed for better readability
+            BASE_WORD_DURATION = 0.3  # Increased base duration
+            MIN_PHRASE_DURATION = 1.5  # Increased minimum duration
+            GAP_DURATION = 0.15  # Increased gap between phrases
             
             # Count total words and calculate average time per word
             total_words = sum(len(phrase.split()) for phrase in phrases)
@@ -989,7 +923,7 @@ class VideoGenerator:
             
             # Generate timings with a minimal initial delay
             timings = []
-            current_time = 0.05  # Reduced initial delay (was 0.1)
+            current_time = 0.05  # Increased initial delay
             
             for phrase in phrases:
                 # Calculate base duration from words
@@ -998,12 +932,12 @@ class VideoGenerator:
                 
                 # Add extra time for punctuation
                 if phrase.strip().endswith(('.', '!', '?')):
-                    base_duration += 0.3  # Reduced end of sentence pause (was 0.4)
+                    base_duration += 0.5  # Increased end of sentence pause
                 elif phrase.strip().endswith((',', ';', ':')):
-                    base_duration += 0.2  # Reduced mid-sentence pause (was 0.3)
+                    base_duration += 0.2  # Increased mid-sentence pause
                 
                 # Ensure minimum duration with some variability
-                min_duration = max(MIN_PHRASE_DURATION, words * 0.25)  # Reduced word-based minimum (was 0.3)
+                min_duration = max(MIN_PHRASE_DURATION, words * 0.25)  # Increased word-based minimum
                 duration = max(base_duration, min_duration)
                 
                 # Create timing entry
@@ -1017,10 +951,10 @@ class VideoGenerator:
                 
                 # Update current time with gap
                 current_time += duration + GAP_DURATION
-        
+            
             # If we're over total duration, scale back proportionally
             if current_time > total_duration:
-                scale_factor = (total_duration - 0.1) / current_time  # Reduced end buffer (was 0.2)
+                scale_factor = (total_duration - 0.1) / current_time  # Increased end buffer
                 for timing in timings:
                     timing['start'] *= scale_factor
                     timing['end'] *= scale_factor
@@ -1131,18 +1065,20 @@ class VideoGenerator:
 
     def animate_text(self, txt_clip):
         """Add more complex text animations"""
-        return txt_clip.fx(
-            vfx.slide_in, duration=0.5, side='right'
-        ).fx(
-            vfx.slide_out, duration=0.5, side='left'
+        return txt_clip.with_effect(
+            vfx.SLIDE_IN, duration=0.5, side='right'
+        ).with_effect(
+            vfx.SLIDE_OUT, duration=0.5, side='left'
         )
 
     def validate_dependencies(self) -> None:
         """Validate that all required dependencies are available"""
         try:
             # Check for required Python packages
-            import moviepy.editor
-            import PIL
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+            from moviepy.audio.io.AudioFileClip import AudioFileClip
+            from moviepy.video.VideoClip import VideoClip
+            from PIL import Image
             
             # Check for required directories
             required_dirs = ['contents/video', 'contents/audio', 'contents/temp']

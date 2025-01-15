@@ -1,38 +1,24 @@
 import os
-import json
 import math
-import asyncio
 import traceback
 import numpy as np
 from PIL import Image
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import  List, Dict, Any
 
 import numpy as np
 from moviepy.editor import *
-from moviepy.video.tools.subtitles import SubtitlesClip
 from moviepy.video.VideoClip import ColorClip, TextClip
 
 from moviepy.editor import AudioFileClip, TextClip, CompositeVideoClip, ImageClip, ColorClip, vfx, VideoClip, VideoFileClip
 from moviepy.config import change_settings
 import re
-import speech_recognition as sr
 import openai
-import time
-from together import Together
 from proglog import ProgressBarLogger
-from difflib import SequenceMatcher
-import tempfile
 import whisper
-import torch
-from pydub import AudioSegment
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
-import edge_tts
 import librosa
-import scipy.signal
-import base64
-import io
 
 class MyBarLogger(ProgressBarLogger):
     def __init__(self, progress_callback=None):
@@ -457,7 +443,7 @@ class VideoGenerator:
         """Get text segments with precise timings using Whisper speech-to-text"""
         try:
             print("Loading Whisper model...")
-            model = whisper.load_model("medium")  # Using medium model for better accuracy
+            model = whisper.load_model("small")  # Using medium model for better accuracy
             
             # First detect the language
             print("Detecting language...")

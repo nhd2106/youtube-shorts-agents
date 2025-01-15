@@ -6,6 +6,8 @@ from openai import OpenAI
 from pathlib import Path
 import hashlib
 import json
+from elevenlabs.client import ElevenLabs
+
 
 class AudioGenerator:
     AVAILABLE_MODELS = {
@@ -24,6 +26,11 @@ class AudioGenerator:
             "default_voice": "echo",
             "voices": ["echo", "alloy", "fable", "onyx", "nova", "shimmer"]
         },
+        "elevenlabs": { 
+            "name": "ElevenLabs",
+            "default_voice": "Bella",
+            "voices": ["Bella", "Luna", "Vito"]
+        }
     }
 
     def __init__(self):
@@ -117,7 +124,17 @@ class AudioGenerator:
                         speed=1.25  # OpenAI TTS supports speed adjustment
                     )
                     response.stream_to_file(str(output_path))
-                
+                elif model == "elevenlabs":
+                    client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+                    audio = client.generate(
+                        text=script,
+                        voice=voice,
+                        model="eleven_flash_v2_5",
+                        stream=True
+                    )
+                    with open(output_path, "wb") as f:
+                        for chunk in audio:
+                            f.write(chunk)  
                 # Cache the generated audio
                 import shutil
                 shutil.copy2(output_path, cache_path)

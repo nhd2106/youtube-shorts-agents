@@ -40,7 +40,7 @@ RUN pip install --no-cache-dir "numpy>=1.22.0,<2.0.0" && \
     rm -rf /root/.cache/pip/*
 
 # Install audio processing dependencies
-RUN pip install --no-cache-dir soundfile>=0.12.1 librosa>=0.10.1 && \
+RUN pip install --no-cache-dir  librosa>=0.10.1 && \
     rm -rf /root/.cache/pip/*
 
 # Verify installations

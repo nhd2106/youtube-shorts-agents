@@ -28,15 +28,10 @@ torchaudio==2.0.2+cpu
 # Audio Processing
 edge-tts>=6.1.9
 gTTS>=2.5.1
-SpeechRecognition>=3.10.0
-wave>=0.0.2
-soundfile>=0.12.1
 librosa>=0.10.1
 
 # Natural Language Processing
 deepfilternet>=0.5.0
-vinorm>=2.0.0
-underthesea>=1.3.0
 cutlet>=0.3.0
 unidic-lite>=1.0.8
 
@@ -44,12 +39,7 @@ unidic-lite>=1.0.8
 typing-extensions>=4.0.0
 pathlib>=1.0.1
 aiohttp>=3.8.0
-google-api-python-client>=2.0.0
-google-auth-oauthlib>=1.0.0
 
-# UI
-gradio>=4.0.0
 
 # Optional Dependencies
-vosk>=0.3.45
 openai-whisper>=20231117

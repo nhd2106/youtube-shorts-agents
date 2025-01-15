@@ -59,21 +59,32 @@ Guidelines for content creation:
 
 2. Script rules:
     - Content Type Guidelines:
-        • Historical: Include precise dates, locations, and detailed context
-        • Narrative: Ensure complete, satisfying story arcs with character development
-        • Factual: Present {format_spec["type"] == "shorts" and "7-10" or "15-20"} verified, engaging facts
-        • Tutorial: Provide clear, step-by-step instructions with detailed explanations
-        • Opinion: Balance viewpoints with evidence and expert citations
+        • Historical: Include vivid storytelling elements to make dates and locations more engaging
+        • Narrative: Focus on building relatable characters and a compelling plot
+        • Factual: Use intriguing hooks to capture attention early on
+        • Tutorial: Include interactive elements or visuals to aid understanding
+        • Opinion: Balance opinions with compelling arguments and counterpoints to stimulate thought
     - Reference Guidelines:
-        • when user paste a link, you need to read the content and summarize it, don't too short.
+        • when user paste url, you need Extract detailed information from the following article, including specific numbers, times, and key events:
+            1. The main topic or purpose of the content.
+            2. Key details, including dates, numbers, or statistics mentioned.
+            3. Specific events, incidents, or actions described, if applicable.
+            4. Any insights, arguments, or conclusions presented by the author.
+            5. Notable quotes or statements from the text.
+            6. Other relevant details that contribute to understanding the content.
+            Provide a clear and concise summary of the extracted information, structured for readability.
+        • Encourage the use of visuals or infographics when extracting detailed information
+        • Summarize key points in bullet form for easier readability and retention
     - Content Requirements:
         • Consistently match the input language
         • don't seperate numbers by comma or dot, keep them together
         • Focus solely on the requested topic
         • Target length: {format_spec["word_count"]} for a {format_spec["script_length"]} video
         • Keep the tone {format_spec["style"]}
+        • Maintain a consistent tone that aligns with the intended audience
+        • Use storytelling techniques such as anecdotes or metaphors
         • For normal format: Include detailed examples, case studies, or real-world applications
-        • For shorts: Keep it concise and immediately engaging
+        • For shorts: Keep it concise and immediately engaging, use punchy language and dynamic visuals
         • Conclude with: in English "If you found this helpful, like and subscribe for more!"  or in Vietnamese "Nếu bạn thấy hay, đừng quên bấm like và đăng ký để ủng hộ kênh" (Choose one based on the user input language)
     - Storytelling Framework - Select ONE:
         • Hero's Journey: Challenge → Struggle → Triumph
@@ -83,6 +94,8 @@ Guidelines for content creation:
         • Dual-Perspective Story: Before/After format
         • 10-Second Engagement Rule
         • Rhythmic/Rhyming Pattern for memorability
+        • Experiment with different frameworks to see which resonates best
+        • Use the 7-Second Hook to grab attention immediately
     * Remember: Language must match with the user input language
 
 3. Hashtag Strategy:
@@ -90,6 +103,8 @@ Guidelines for content creation:
     - Include trending, relevant tags
     - Ensure hashtag relevance to content
     - Optimal mix: 60% topic-specific, 40% general engagement
+    - Regularly update hashtags to include trending topics
+    - Analyze engagement metrics to refine hashtag usage
 
 4. Quality Standards:
     - Prioritize accuracy and current information
@@ -99,6 +114,8 @@ Guidelines for content creation:
     - Avoid filler content or unnecessary details
     - For normal format: Include supporting details, examples, and deeper analysis
     - For shorts: Focus on key points and immediate value
+    - Incorporate user feedback to improve content quality
+    - Use analytics to identify best-performing content formats and topics
 
 Note: Exclude emojis, icons, or special characters from the script content.'''
 

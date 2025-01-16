@@ -48,165 +48,247 @@ class ContentGenerator:
         self.together_client = together
 
     async def _extract_images_from_url(self, url: str) -> List[str]:
-        """Extract image URLs from a webpage, focusing on main content area"""
+        """Extract image URLs from webpage, focusing on main article content first"""
         try:
             # Disable SSL verification warnings
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            # Create a session with SSL verification disabled
+            # Create a session with custom headers
             session = requests.Session()
             session.verify = False
+            session.headers.update(self.headers)
             
-            # Add retry mechanism
-            retries = urllib3.util.Retry(
-                total=3,
-                backoff_factor=0.5,
-                status_forcelist=[500, 502, 503, 504]
-            )
-            session.mount('https://', requests.adapters.HTTPAdapter(max_retries=retries))
-            
-            response = session.get(url, headers=self.headers, timeout=10)
+            # Make the request
+            response = session.get(url, timeout=15)
             response.raise_for_status()
+            
+            # Parse with BeautifulSoup
             soup = BeautifulSoup(response.text, 'html.parser')
+            image_urls = set()
             
-            image_urls = set()  # Use set to avoid duplicates
-            
-            # First, try to find the main content area with specific site patterns
-            content_selectors = [
-                'div.article-body',          # dantri.com.vn
-                'div.dt-news__content',      # dantri.com.vn (alternate)
-                'article',                   # general
-                'main',                      # general
-                'div.content-detail',        # general news sites
-                'div.article-content',       # general news sites
-                'div.post-content',          # blog style
-                'div.entry-content',         # wordpress
-                'div.main-content',          # general
-                'div.container',             # common container class
-                'div.main',                  # main content class
-                'div.main-container',        # combined main container
-                'div.content-container',     # content container
-                'div.article-container',     # article container
-                'div.post-container'         # post container
+            # Priority 1: Find the main article content container
+            main_content_selectors = [
+                'article.content-detail',
+                'article.fck_detail',
+                'div.fck_detail',
+                'article.article-detail',
+                'div.article-body',
+                'div.article-content',
+                'div[itemprop="articleBody"]',
+                'div.detail-content',
+                '.article__body',
+                '.article__content',
+                '.post-content',
+                '.entry-content',
+                'article.post',
+                'main article',
+                '[role="main"] article',
+                '.main-content article',
+                '.content article'
             ]
             
             main_content = None
-            
-            # First try to find sections containing h1 or h2 tags
-            for heading in soup.find_all(['h1', 'h2']):
-                # Look for parent containers that might be the main content
-                parent = heading.find_parent(['article', 'main', 'div'])
-                if parent:
-                    # Check if parent has relevant classes
-                    parent_classes = parent.get('class', [])
-                    relevant_classes = any(cls in ' '.join(parent_classes).lower() 
-                                        for cls in ['content', 'article', 'post', 'main', 'container'])
-                    
-                    # Check if this parent contains substantial content
-                    text_length = len(parent.get_text())
-                    images_count = len(parent.find_all('img'))
-                    paragraphs_count = len(parent.find_all('p'))
-                    
-                    if (text_length > 500 or images_count > 0 or paragraphs_count > 2) and \
-                       (relevant_classes or text_length > 1000):  # More strict if no relevant classes
-                        main_content = parent
-                        print(f"Found content area containing heading: {heading.get_text()[:50]}...")
-                        break
-
-            # If no content found with headings, try regular selectors
-            if not main_content:
-                for selector in content_selectors:
-                    if '.' in selector:
-                        # Class selector
-                        class_name = selector.split('.')[-1]
-                        main_content = soup.find('div', class_=class_name)
-                    else:
-                        # Tag selector
-                        main_content = soup.find(selector)
-                    if main_content:
-                        print(f"Found content area using selector: {selector}")
-                        break
-            
-            if not main_content:
-                # Fallback: try to find any div with content-related classes
-                content_patterns = [
-                    r'article|post|entry|content|body|detail|main|text|container',
-                ]
-                for pattern in content_patterns:
-                    candidates = soup.find_all('div', class_=re.compile(pattern, re.I))
-                    # Sort candidates by content length to find the most substantial one
-                    candidates = sorted(candidates, 
-                                     key=lambda x: len(x.get_text()) + len(x.find_all('img')) * 100,
-                                     reverse=True)
-                    if candidates:
-                        main_content = candidates[0]
-                        print(f"Found content area using pattern: {pattern}")
-                        break
+            for selector in main_content_selectors:
+                main_content = soup.select_one(selector)
+                if main_content:
+                    break
             
             if main_content:
-                # Find all figures first (often contain main article images)
-                for figure in main_content.find_all('figure'):
+                # Extract images from main content first
+                # 1. Look for figure/picture elements
+                for figure in main_content.find_all(['figure', 'picture']):
+                    # Check picture elements
+                    picture = figure.find('picture')
+                    if picture:
+                        # Get highest quality source
+                        for source in picture.find_all('source'):
+                            srcset = source.get('srcset')
+                            if srcset:
+                                urls = [s.strip().split(' ')[0] for s in srcset.split(',')]
+                                if urls:
+                                    src = self._clean_url(urls[-1], url)
+                                    if self._is_valid_image_url(src):
+                                        image_urls.add(src)
+                    
+                    # Check img elements
                     img = figure.find('img')
                     if img:
-                        for attr in ['data-original', 'data-src', 'src']:
+                        for attr in ['data-src', 'src', 'data-original', 'data-lazy-src']:
                             src = img.get(attr)
                             if src:
                                 src = self._clean_url(src, url)
                                 if self._is_valid_image_url(src):
                                     image_urls.add(src)
-                                    print(f"Found image in figure: {src}")
                                     break
                 
-                # Then find all images
+                # 2. Look for direct img elements in main content
                 for img in main_content.find_all('img'):
-                    for attr in ['data-original', 'data-src', 'src']:
+                    for attr in ['data-src', 'src', 'data-original', 'data-lazy-src']:
                         src = img.get(attr)
                         if src:
                             src = self._clean_url(src, url)
                             if self._is_valid_image_url(src):
                                 image_urls.add(src)
-                                print(f"Found image: {src}")
                                 break
             
-            # If we still don't have enough images, try meta og:image
-            if len(image_urls) < 3:
-                for meta in soup.find_all('meta', property=['og:image', 'twitter:image']):
-                    content = meta.get('content')
-                    if content:
-                        src = self._clean_url(content, url)
-                        if self._is_valid_image_url(src):
-                            image_urls.add(src)
-                            print(f"Found meta image: {src}")
+            # If no images found in main content, try meta tags
+            if not image_urls:
+                meta_selectors = {
+                    'property': ['og:image', 'twitter:image', 'og:image:secure_url'],
+                    'name': ['thumbnail', 'twitter:image:src', 'twitter:image'],
+                    'itemprop': ['image']
+                }
+                
+                for attr, values in meta_selectors.items():
+                    for value in values:
+                        for meta in soup.find_all('meta', {attr: value}):
+                            content = meta.get('content')
+                            if content:
+                                src = self._clean_url(content, url)
+                                if self._is_valid_image_url(src):
+                                    image_urls.add(src)
             
-            # If still not enough images, look for images near headings
-            if len(image_urls) < 3:
-                for heading in soup.find_all(['h1', 'h2', 'h3']):
-                    # Look for images in siblings
-                    for sibling in heading.find_next_siblings():
-                        for img in sibling.find_all('img'):
-                            for attr in ['data-original', 'data-src', 'src']:
+            # If still no images found, try JSON-LD data
+            if not image_urls:
+                for script in soup.find_all('script', type='application/ld+json'):
+                    try:
+                        data = json.loads(script.string)
+                        self._extract_images_from_json(data, image_urls, url)
+                    except Exception as e:
+                        print(f"Error parsing JSON-LD: {str(e)}")
+            
+            # Last resort: look for images in related content areas
+            if not image_urls:
+                related_selectors = [
+                    'div.related-content',
+                    'div.article-related',
+                    'div.related-articles',
+                    'aside.related',
+                    '.related-posts'
+                ]
+                
+                for selector in related_selectors:
+                    related = soup.select_one(selector)
+                    if related:
+                        for img in related.find_all('img'):
+                            for attr in ['data-src', 'src', 'data-original', 'data-lazy-src']:
                                 src = img.get(attr)
                                 if src:
                                     src = self._clean_url(src, url)
                                     if self._is_valid_image_url(src):
                                         image_urls.add(src)
-                                        print(f"Found image near heading: {src}")
                                         break
-                        if len(image_urls) >= 3:
-                            break
-                    if len(image_urls) >= 3:
-                        break
             
-            print(f"Found {len(image_urls)} images from main content area of {url}")
-            return list(image_urls)
+            # Convert set to list and ensure all URLs are valid
+            image_urls = [url for url in image_urls if url and self._is_valid_image_url(url)]
             
-        except requests.exceptions.SSLError as ssl_err:
-            print(f"SSL Error for {url}: {str(ssl_err)}")
-            return []
+            print(f"Found {len(image_urls)} unique images from main content of {url}")
+            return image_urls
+            
         except Exception as e:
             print(f"Error extracting images from URL: {str(e)}")
             return []
+
+    def _detect_site_type(self, url: str) -> str:
+        """Detect the type of news site from URL"""
+        if 'vnexpress.net' in url:
+            return 'vnexpress'
+        elif 'dantri.com.vn' in url:
+            return 'dantri'
+        elif 'nhandan.vn' in url:
+            return 'nhandan'
+        return 'generic'
+
+    def _extract_vnexpress_images(self, soup: BeautifulSoup, base_url: str) -> set:
+        """Extract images specifically from VnExpress"""
+        image_urls = set()
+        try:
+            # Find all figure elements with specific VnExpress classes
+            figures = soup.find_all(['figure', 'div'], class_=['fig-picture', 'item-news-common', 'image', 'pic'])
+            
+            for fig in figures:
+                # Try to find picture element first
+                picture = fig.find('picture')
+                if picture:
+                    # Get source elements for highest quality image
+                    sources = picture.find_all('source')
+                    for source in sources:
+                        srcset = source.get('srcset')
+                        if srcset:
+                            urls = [s.strip().split(' ')[0] for s in srcset.split(',')]
+                            if urls:
+                                src = self._clean_url(urls[-1], base_url)
+                                if self._is_valid_image_url(src):
+                                    image_urls.add(src)
+                
+                # Try to find img element
+                img = fig.find('img')
+                if img:
+                    for attr in ['data-src', 'src', 'data-original']:
+                        src = img.get(attr)
+                        if src:
+                            src = self._clean_url(src, base_url)
+                            if self._is_valid_image_url(src):
+                                image_urls.add(src)
+                                break
+            
+            # Try to find images in specific VnExpress containers
+            containers = soup.find_all(['div', 'article'], class_=['fig-picture', 'fck_detail', 'content-detail'])
+            for container in containers:
+                for img in container.find_all('img'):
+                    for attr in ['data-src', 'src', 'data-original']:
+                        src = img.get(attr)
+                        if src:
+                            src = self._clean_url(src, base_url)
+                            if self._is_valid_image_url(src):
+                                image_urls.add(src)
+                                break
+        
+        except Exception as e:
+            print(f"Error extracting VnExpress images: {str(e)}")
+        
+        return image_urls
+
+    def _extract_dantri_images(self, soup: BeautifulSoup, base_url: str) -> set:
+        """Extract images specifically from Dan Tri"""
+        image_urls = set()
+        try:
+            # Find all figure elements with Dan Tri specific classes
+            figures = soup.find_all(['figure', 'div'], class_=['image', 'article-thumb', 'dt-image'])
+            for fig in figures:
+                img = fig.find('img')
+                if img:
+                    for attr in ['data-src', 'src', 'data-original']:
+                        src = img.get(attr)
+                        if src:
+                            src = self._clean_url(src, base_url)
+                            if self._is_valid_image_url(src):
+                                image_urls.add(src)
+                                break
+        except Exception as e:
+            print(f"Error extracting Dan Tri images: {str(e)}")
+        return image_urls
+
+    def _extract_nhandan_images(self, soup: BeautifulSoup, base_url: str) -> set:
+        """Extract images specifically from Nhan Dan"""
+        image_urls = set()
+        try:
+            # Find all figure elements with Nhan Dan specific classes
+            figures = soup.find_all(['figure', 'div'], class_=['article-image', 'image', 'detail-image'])
+            for fig in figures:
+                img = fig.find('img')
+                if img:
+                    for attr in ['data-src', 'src', 'data-original']:
+                        src = img.get(attr)
+                        if src:
+                            src = self._clean_url(src, base_url)
+                            if self._is_valid_image_url(src):
+                                image_urls.add(src)
+                                break
+        except Exception as e:
+            print(f"Error extracting Nhan Dan images: {str(e)}")
+        return image_urls
 
     def _clean_url(self, url: str, base_url: str) -> str:
         """Clean and normalize image URL"""
@@ -227,15 +309,21 @@ class ContentGenerator:
         """Check if URL points to a valid image"""
         try:
             # List of common image extensions
-            image_extensions = ('.jpg', '.jpeg', '.png', '.webp')
+            image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
             
-            # Exclude patterns (reduced to focus on size-related patterns)
+            # Exclude patterns for small or irrelevant images
             excluded_patterns = (
                 'icon',
                 'avatar',
                 'emoji',
                 'button',
-                'logo-small',
+                'loading',
+                'spinner',
+                'pixel',
+                'tracking',
+                'advertisement',
+                'banner',
+                'logo'
             )
             
             url_lower = url.lower()
@@ -243,11 +331,14 @@ class ContentGenerator:
             # Basic checks
             if not url_lower or 'data:image' in url_lower:
                 return False
-                
+            
             # Check file extension
             if not any(url_lower.endswith(ext) for ext in image_extensions):
-                return False
-                
+                # Try to find extension in the URL path
+                path_parts = url_lower.split('/')
+                if not any(part for part in path_parts if any(ext in part for ext in image_extensions)):
+                    return False
+            
             # Check for excluded patterns
             if any(pattern in url_lower for pattern in excluded_patterns):
                 return False
@@ -256,11 +347,11 @@ class ContentGenerator:
             dimensions = re.findall(r'(\d+)x(\d+)', url_lower)
             if dimensions:
                 width, height = map(int, dimensions[0])
-                if width < 300 or height < 300:  # Reduced minimum size
+                if width < 300 or height < 300:  # Increased minimum size for article images
                     return False
             
             # Check for small image indicators in URL
-            small_indicators = ['thumb', 'tiny', '150x', '100x', '200x']
+            small_indicators = ['thumb', 'tiny', '50x', '100x', '150x', '200x']
             if any(indicator in url_lower for indicator in small_indicators):
                 return False
             

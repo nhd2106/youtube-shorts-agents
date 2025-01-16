@@ -589,14 +589,14 @@ class VideoGenerator:
             audio = AudioFileClip(audio_path)
             self.DURATION = audio.duration
             print(f"Audio duration: {self.DURATION}")
-
+            
             # Get speech-to-text segments
             print("\nGetting speech-to-text segments...")
             phrase_timings = await self.get_precise_word_timings(audio_path, content['script'])
             if not phrase_timings:
                 print("Falling back to script-based timing...")
             print(f"Generated {len(phrase_timings)} phrase timings")
-
+            
             # Create background
             print("\nCreating background...")
             if background_images and len(background_images) > 0:
@@ -604,7 +604,7 @@ class VideoGenerator:
                 segment_duration = self.DURATION / num_images
                 durations = [segment_duration] * num_images
                 print(f"Using {num_images} images with {segment_duration:.2f}s each")
-
+                
                 background_clips = self._create_background_clips(background_images, durations)
                 if not background_clips:
                     raise ValueError("Failed to create background clips")
@@ -621,7 +621,7 @@ class VideoGenerator:
                     color=(0, 0, 0),
                     duration=self.DURATION
                 )
-
+            
             # Create text clips
             print("\nCreating text clips...")
             text_clips = []
@@ -650,7 +650,7 @@ class VideoGenerator:
                     print(f"Added subtitle clip: {timing['word']}")
                 else:
                     print(f"Failed to create clip for: {timing['word']}")
-
+            
             print(f"\nCreated {len(text_clips)} text clips")
             
             # Create final composition
@@ -666,7 +666,7 @@ class VideoGenerator:
                 [background, text_composite],
                 size=(self.WIDTH, self.HEIGHT)
             ).with_duration(self.DURATION)
-
+            
             # Add audio
             print("\nPreprocessing audio...")
             audio.write_audiofile(
@@ -680,7 +680,7 @@ class VideoGenerator:
             
             processed_audio = AudioFileClip(str(temp_audio_path))
             final = final.with_audio(processed_audio)
-
+            
             # Write final video
             print(f"\nWriting video to: {video_path}")
             final.write_videofile(
@@ -786,16 +786,9 @@ class VideoGenerator:
             size=(bg_width, bg_height)
         ).with_duration(duration)
         
-        # Add title-specific animations
-        final_clip = final_clip.with_effects([
-            vfx.CrossFadeIn(duration=1.0),
-            vfx.CrossFadeOut(duration=1.0)
-        ])
-        
-        # Update floating effect position to 1/6 from top
-        float_amount = 8
+        # Position at 1/6 from top
         final_clip = final_clip.with_position(
-            lambda t: ('center', int(self.HEIGHT * 1/6 + float_amount * math.sin(2 * math.pi * t / 4)))
+            ('center', int(self.HEIGHT * 1/6))
         )
         
         return final_clip

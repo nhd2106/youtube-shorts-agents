@@ -166,7 +166,7 @@ class VideoGenerator:
             
             # Create background with padding
             padding = 20
-            bg_width = self.WIDTH  # Full video width
+            bg_width = txt_clip.w + (padding * 2)  # Match text width plus padding
             bg_height = int(txt_clip.h + (padding * 2))
             
             # Create background array with alpha channel
@@ -177,7 +177,7 @@ class VideoGenerator:
             # Create background clip
             bg_clip = ImageClip(bg_array).with_duration(duration)
             
-            # Position text in center
+            # Position text in center of background
             txt_clip = txt_clip.with_position('center')
             
             # Create text with background
@@ -215,7 +215,7 @@ class VideoGenerator:
             t = max(0, min(1, t/duration))
             return t * t * (3 - 2 * t)
         
-        # Define possible effects
+        # Define possible effects with reduced intensity
         effects = [
             # No movement
             {
@@ -227,50 +227,51 @@ class VideoGenerator:
                     'needs_resize': False
                 }
             },
-            # Zoom in
+            # Gentle zoom in
             {
                 'name': 'zoom_in',
                 'transform': lambda t: {
-                    'scale': 1.0 + (0.15 * ease_in_out(t)),
+                    'scale': 1.0 + (0.08 * ease_in_out(t)),  # Reduced zoom scale
                     'pos_x': 0,
                     'pos_y': 0,
                     'needs_resize': True
                 }
             },
-            # Zoom out
+            # Gentle zoom out
             {
                 'name': 'zoom_out',
                 'transform': lambda t: {
-                    'scale': 1.15 - (0.15 * ease_in_out(t)),
+                    'scale': 1.08 - (0.08 * ease_in_out(t)),  # Reduced zoom scale
                     'pos_x': 0,
                     'pos_y': 0,
                     'needs_resize': True
                 }
             },
-            # Pan right
+            # Subtle pan right
             {
                 'name': 'pan_right',
                 'transform': lambda t: {
                     'scale': 1.0,
-                    'pos_x': -clip.w * 0.1 * ease_in_out(t),
+                    'pos_x': -clip.w * 0.05 * ease_in_out(t),  # Reduced pan distance
                     'pos_y': 0,
                     'needs_resize': False
                 }
             },
-            # Pan left
+            # Subtle pan left
             {
                 'name': 'pan_left',
                 'transform': lambda t: {
                     'scale': 1.0,
-                    'pos_x': clip.w * 0.1 * ease_in_out(t),
+                    'pos_x': clip.w * 0.05 * ease_in_out(t),  # Reduced pan distance
                     'pos_y': 0,
                     'needs_resize': False
                 }
             }
         ]
         
-        # Select random effect
-        effect = random.choice(effects)
+        # Select random effect with higher chance of static
+        weights = [0.4] + [0.15] * 4  # 40% chance of static, 15% each for other effects
+        effect = random.choices(effects, weights=weights)[0]
         print(f"Applying {effect['name']} effect")
         
         def make_frame(t):
@@ -336,9 +337,28 @@ class VideoGenerator:
                 with Image.open(image_path) as img:
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
-                    # Resize to exact video dimensions
-                    target_size = (self.WIDTH, self.HEIGHT)
-                    img = img.resize(target_size, Image.Resampling.LANCZOS)
+                    
+                    # Calculate target dimensions while preserving aspect ratio
+                    target_ratio = self.WIDTH / self.HEIGHT
+                    img_ratio = img.width / img.height
+                    
+                    if img_ratio > target_ratio:
+                        # Image is wider than needed
+                        new_height = self.HEIGHT
+                        new_width = int(new_height * img_ratio)
+                    else:
+                        # Image is taller than needed
+                        new_width = self.WIDTH
+                        new_height = int(new_width / img_ratio)
+                    
+                    # Resize image maintaining aspect ratio
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    
+                    # Center crop to video dimensions
+                    left = (new_width - self.WIDTH) // 2
+                    top = (new_height - self.HEIGHT) // 2
+                    img = img.crop((left, top, left + self.WIDTH, top + self.HEIGHT))
+                    
                     # Convert to numpy array
                     img_array = np.array(img)
                 
@@ -354,7 +374,7 @@ class VideoGenerator:
                         effect = {
                             'name': 'zoom_in',
                             'transform': lambda t: {
-                                'scale': 1.0 + (0.15 * self.ease_in_out(t/duration)),
+                                'scale': 1.0 + (0.1 * self.ease_in_out(t/duration)),  # Reduced zoom scale
                                 'pos_x': 0,
                                 'pos_y': 0,
                                 'needs_resize': True
@@ -730,68 +750,66 @@ class VideoGenerator:
         self.WIDTH = format_spec["width"]
         self.HEIGHT = format_spec["height"]
 
-    def create_title_clip(self, text: str, duration: float) -> TextClip:
-        """Create an enhanced title clip with dynamic effects"""
-        # Reduce title size
-        fontsize = 62 if self.current_format == "shorts" else 50  # Reduced from 90/72
-        
-        text_clip = TextClip(
-            font="/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-            text=text,
-            font_size=fontsize,
-            color='yellow',
-            stroke_color='yellow',
-            stroke_width=3,
-            size=(int(self.WIDTH - 100), None),
-            method='caption',
-            text_align='center'
-        ).with_duration(duration)
-        
-        # Create background with padding
-        padding = 30
-        bg_width = self.WIDTH  # Full video width
-        bg_height = int(text_clip.h + (padding * 2))
-        
-        # Create background array with alpha channel
-        bg_array = np.zeros((bg_height, bg_width, 4), dtype=np.uint8)
-        bg_array[..., :3] = [0, 0, 50]  # RGB dark blue
-        bg_array[..., 3] = int(0.7 * 255)  # Alpha channel at 70% opacity
-        
-        # Create background clip
-        bg = ImageClip(bg_array).with_duration(duration)
-        
-        # Add glow effect
-        glow = text_clip.copy()
-        glow = glow.with_opacity(0.4)
-        
-        # Calculate center position
-        center_pos = ('center', 'center')
-        
-        # Create glow positions using lambda functions for offset
-        def offset_position(x_offset=0, y_offset=0):
-            return lambda t: (
-                'center',
-                'center' if y_offset == 0 else int(self.HEIGHT//2 + y_offset)
+    def create_title_clip(self, title: str, duration: float) -> TextClip:
+        """Create title clip with background"""
+        try:
+            # Font settings
+            fontsize = 72 if self.current_format == "shorts" else 60
+            
+            # Create the main text clip
+            txt_clip = TextClip(
+                font="/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                text=title,
+                font_size=fontsize,
+                color='white',
+                stroke_color='black',
+                stroke_width=2,
+                size=(int(self.WIDTH * 0.8), None),
+                method='caption',
+                text_align='center'
+            ).with_duration(duration)
+            
+            # Create background with padding
+            padding = 25
+            bg_width = txt_clip.w + (padding * 2)  # Match text width plus padding
+            bg_height = int(txt_clip.h + (padding * 2))
+            
+            # Create background array with alpha channel
+            bg_array = np.zeros((bg_height, bg_width, 4), dtype=np.uint8)
+            bg_array[..., :3] = 0  # RGB black
+            bg_array[..., 3] = int(0.8 * 255)  # Alpha channel at 80% opacity
+            
+            # Create background clip
+            bg_clip = ImageClip(bg_array).with_duration(duration)
+            
+            # Position text in center of background
+            txt_clip = txt_clip.with_position('center')
+            
+            # Create text with background
+            composed_clip = CompositeVideoClip(
+                clips=[bg_clip, txt_clip],
+                size=(bg_width, bg_height)
+            ).with_duration(duration)
+
+            # Position at the top with padding
+            top_padding = int(self.HEIGHT * 0.1)  # 10% from top
+            composed_clip = composed_clip.with_position(
+                ('center', top_padding)
             )
-        
-        # Composite with animations - layer multiple glows with different offsets
-        final_clip = CompositeVideoClip(
-            clips=[
-                bg.with_position(center_pos),
-                glow.with_position(offset_position(y_offset=-2)),  # Up
-                glow.with_position(offset_position(y_offset=2)),   # Down
-                glow.with_position(offset_position()),             # Center
-                text_clip.with_position(center_pos)
-            ],
-            size=(bg_width, bg_height)
-        ).with_duration(duration)
-        
-        # Position at 1/6 from top
-        final_clip = final_clip.with_position(
-            ('center', int(self.HEIGHT * 1/6))
-        )
-        
-        return final_clip
+            
+            # Add fade effects
+            fade_duration = min(0.5, duration * 0.2)  # 20% of duration or 0.5s, whichever is shorter
+            composed_clip = composed_clip.with_effects([
+                vfx.CrossFadeIn(duration=fade_duration),
+                vfx.CrossFadeOut(duration=fade_duration)
+            ])
+            
+            return composed_clip
+            
+        except Exception as e:
+            print(f"Error creating title clip: {str(e)}")
+            traceback.print_exc()
+            return None
 
     async def generate_prompts_with_openai(self, script: str, api_keys: dict = None) -> List[str]:
         video_format = self.current_format

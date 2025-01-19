@@ -9,6 +9,7 @@ from PIL import Image
 import uuid
 import os
 import json
+import urllib.parse
 
 class VideoFormat(TypedDict):
     type: str  # 'shorts' or 'normal'
@@ -25,14 +26,21 @@ class ContentGenerator:
     def __init__(self):
         self.client = None
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'image',
-            'Sec-Fetch-Mode': 'no-cors',
-            'Sec-Fetch-Site': 'cross-site'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Connection': 'keep-alive'
         }
 
     def _init_client(self, api_keys: dict):
@@ -57,137 +65,158 @@ class ContentGenerator:
             # Create a session with custom headers
             session = requests.Session()
             session.verify = False
-            session.headers.update(self.headers)
             
-            # Make the request
+            # Update headers based on the site
+            headers = self.headers.copy()
+            parsed_url = urllib.parse.urlparse(url)
+            domain = parsed_url.netloc
+            
+            headers.update({
+                'Host': domain,
+                'Referer': f"{parsed_url.scheme}://{domain}/",
+                'Origin': f"{parsed_url.scheme}://{domain}"
+            })
+            
+            session.headers.update(headers)
+            
+            # Make the request with multiple encoding attempts
             response = session.get(url, timeout=15)
             response.raise_for_status()
             
-            # Parse with BeautifulSoup
-            soup = BeautifulSoup(response.text, 'html.parser')
+            # Try different encodings if content seems garbled
+            content = None
+            encodings = ['utf-8', 'utf-16', 'windows-1252', 'latin1', 'iso-8859-1']
+            
+            for encoding in encodings:
+                try:
+                    response.encoding = encoding
+                    content = response.text
+                    # Check if content seems valid (contains some common HTML tags)
+                    if re.search(r'<html|<body|<div|<img', content, re.IGNORECASE):
+                        break
+                except UnicodeDecodeError:
+                    continue
+            
+            if not content:
+                print(f"Failed to decode content from {url} with any known encoding")
+                return []
+            
+            # Parse with BeautifulSoup using different parsers
+            soup = None
+            parsers = ['html.parser', 'lxml', 'html5lib']
+            
+            for parser in parsers:
+                try:
+                    soup = BeautifulSoup(content, parser)
+                    # Verify we got valid HTML
+                    if soup.find(['body', 'div', 'img']):
+                        break
+                except Exception as e:
+                    print(f"Parser {parser} failed: {str(e)}")
+                    continue
+            
+            if not soup:
+                print(f"Failed to parse HTML content from {url} with any available parser")
+                return []
+            
+            # Remove unwanted elements that might interfere
+            for element in soup.find_all(['script', 'style', 'noscript', 'iframe']):
+                element.decompose()
+            
+            print(f"\nStarting image extraction for URL: {url}")
             image_urls = set()
             
-            # Priority 1: Find the main article content container
-            main_content_selectors = [
-                'article.content-detail',
-                'article.fck_detail',
-                'div.fck_detail',
-                'article.article-detail',
-                'div.article-body',
-                'div.article-content',
-                'div[itemprop="articleBody"]',
-                'div.detail-content',
-                '.article__body',
-                '.article__content',
-                '.post-content',
-                '.entry-content',
-                'article.post',
-                'main article',
-                '[role="main"] article',
-                '.main-content article',
-                '.content article'
-            ]
+            # Try site-specific extraction first
+            site_type = self._detect_site_type(url)
+            print(f"Detected site type: {site_type}")
             
-            main_content = None
-            for selector in main_content_selectors:
-                main_content = soup.select_one(selector)
-                if main_content:
-                    break
+            if site_type != 'generic':
+                try:
+                    extractor_method = getattr(self, f'_extract_{site_type}_images')
+                    site_images = extractor_method(soup, url)
+                    image_urls.update(site_images)
+                    print(f"Found {len(site_images)} images using {site_type} specific extractor")
+                except Exception as e:
+                    print(f"Error in site-specific extraction: {str(e)}")
             
-            if main_content:
-                # Extract images from main content first
-                # 1. Look for figure/picture elements
-                for figure in main_content.find_all(['figure', 'picture']):
-                    # Check picture elements
-                    picture = figure.find('picture')
-                    if picture:
-                        # Get highest quality source
-                        for source in picture.find_all('source'):
-                            srcset = source.get('srcset')
-                            if srcset:
-                                urls = [s.strip().split(' ')[0] for s in srcset.split(',')]
-                                if urls:
-                                    src = self._clean_url(urls[-1], url)
-                                    if self._is_valid_image_url(src):
-                                        image_urls.add(src)
-                    
-                    # Check img elements
-                    img = figure.find('img')
-                    if img:
-                        for attr in ['data-src', 'src', 'data-original', 'data-lazy-src']:
-                            src = img.get(attr)
-                            if src:
-                                src = self._clean_url(src, url)
-                                if self._is_valid_image_url(src):
-                                    image_urls.add(src)
-                                    break
+            # If no images found or site is generic, try generic extraction
+            if not image_urls:
+                print("Trying generic extraction method")
                 
-                # 2. Look for direct img elements in main content
-                for img in main_content.find_all('img'):
-                    for attr in ['data-src', 'src', 'data-original', 'data-lazy-src']:
-                        src = img.get(attr)
-                        if src:
-                            src = self._clean_url(src, url)
-                            if self._is_valid_image_url(src):
-                                image_urls.add(src)
-                                break
-            
-            # If no images found in main content, try meta tags
-            if not image_urls:
-                meta_selectors = {
-                    'property': ['og:image', 'twitter:image', 'og:image:secure_url'],
-                    'name': ['thumbnail', 'twitter:image:src', 'twitter:image'],
-                    'itemprop': ['image']
-                }
-                
-                for attr, values in meta_selectors.items():
-                    for value in values:
-                        for meta in soup.find_all('meta', {attr: value}):
-                            content = meta.get('content')
-                            if content:
-                                src = self._clean_url(content, url)
-                                if self._is_valid_image_url(src):
-                                    image_urls.add(src)
-            
-            # If still no images found, try JSON-LD data
-            if not image_urls:
-                for script in soup.find_all('script', type='application/ld+json'):
-                    try:
-                        data = json.loads(script.string)
-                        self._extract_images_from_json(data, image_urls, url)
-                    except Exception as e:
-                        print(f"Error parsing JSON-LD: {str(e)}")
-            
-            # Last resort: look for images in related content areas
-            if not image_urls:
-                related_selectors = [
-                    'div.related-content',
-                    'div.article-related',
-                    'div.related-articles',
-                    'aside.related',
-                    '.related-posts'
+                # Priority 1: Find the main article content container
+                main_content_selectors = [
+                     'article.content-detail',
+                    'article.fck_detail',
+                    'div.fck_detail',
+                    'article.article-detail',
+                    'div.article-body',
+                    'div.article-content',
+                    'div[itemprop="articleBody"]',
+                    'div.detail-content',
+                    '.article__body',
+                    '.article__content',
+                    '.post-content',
+                    '.entry-content',
+                    'article.post',
+                    'main article',
+                    '[role="main"] article',
+                    '.main-content article',
+                    '.content article',
+                    '.articleDetail',
+                    '.content-detail',
                 ]
                 
-                for selector in related_selectors:
-                    related = soup.select_one(selector)
-                    if related:
-                        for img in related.find_all('img'):
-                            for attr in ['data-src', 'src', 'data-original', 'data-lazy-src']:
+                main_content = None
+                for selector in main_content_selectors:
+                    try:
+                        main_content = soup.select_one(selector)
+                        if main_content:
+                            print(f"Found main content with selector: {selector}")
+                            break
+                    except Exception as e:
+                        print(f"Error with selector {selector}: {str(e)}")
+                
+                if main_content:
+                    # Extract images from main content
+                    for img in main_content.find_all('img'):
+                        for attr in ['data-src', 'src', 'data-original', 'data-lazy-src', 'data-lazy']:
+                            try:
                                 src = img.get(attr)
                                 if src:
                                     src = self._clean_url(src, url)
                                     if self._is_valid_image_url(src):
                                         image_urls.add(src)
                                         break
+                            except Exception as e:
+                                print(f"Error processing image attribute {attr}: {str(e)}")
+                
+                # Try meta tags if still no images
+                if not image_urls:
+                    meta_selectors = {
+                        'property': ['og:image', 'twitter:image', 'og:image:secure_url'],
+                        'name': ['thumbnail', 'twitter:image:src', 'twitter:image'],
+                        'itemprop': ['image']
+                    }
+                    
+                    for attr, values in meta_selectors.items():
+                        for value in values:
+                            try:
+                                for meta in soup.find_all('meta', {attr: value}):
+                                    content = meta.get('content')
+                                    if content:
+                                        src = self._clean_url(content, url)
+                                        if self._is_valid_image_url(src):
+                                            image_urls.add(src)
+                            except Exception as e:
+                                print(f"Error processing meta tag {attr}={value}: {str(e)}")
             
-            # Convert set to list and ensure all URLs are valid
-            image_urls = [url for url in image_urls if url and self._is_valid_image_url(url)]
-            
-            print(f"Found {len(image_urls)} unique images from main content of {url}")
-            return image_urls
+            print(f"Found {len(image_urls)} unique images from {url}")
+            return list(image_urls)
             
         except Exception as e:
             print(f"Error extracting images from URL: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return []
 
     def _detect_site_type(self, url: str) -> str:
@@ -309,50 +338,51 @@ class ContentGenerator:
         """Check if URL points to a valid image"""
         try:
             # List of common image extensions
-            image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
+            image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
             
             # Exclude patterns for small or irrelevant images
             excluded_patterns = (
-                'icon',
-                'avatar',
                 'emoji',
                 'button',
                 'loading',
                 'spinner',
                 'pixel',
-                'tracking',
-                'advertisement',
-                'banner',
-                'logo'
+                'tracking'
             )
             
             url_lower = url.lower()
             
             # Basic checks
             if not url_lower or 'data:image' in url_lower:
+                print(f"Invalid URL (empty or data URL): {url}")
                 return False
             
             # Check file extension
-            if not any(url_lower.endswith(ext) for ext in image_extensions):
-                # Try to find extension in the URL path
-                path_parts = url_lower.split('/')
-                if not any(part for part in path_parts if any(ext in part for ext in image_extensions)):
-                    return False
+            has_valid_extension = any(url_lower.endswith(ext) for ext in image_extensions)
+            has_extension_in_path = any(ext in part for part in url_lower.split('/') for ext in image_extensions)
+            
+            if not (has_valid_extension or has_extension_in_path):
+                print(f"Invalid URL (no valid image extension): {url}")
+                return False
             
             # Check for excluded patterns
             if any(pattern in url_lower for pattern in excluded_patterns):
+                print(f"Invalid URL (contains excluded pattern): {url}")
                 return False
             
             # Check for dimensions in URL (if present)
             dimensions = re.findall(r'(\d+)x(\d+)', url_lower)
             if dimensions:
                 width, height = map(int, dimensions[0])
-                if width < 300 or height < 300:  # Increased minimum size for article images
+                # Only reject very small images
+                if width < 200 or height < 200:
+                    print(f"Invalid URL (dimensions too small: {width}x{height}): {url}")
                     return False
             
             # Check for small image indicators in URL
-            small_indicators = ['thumb', 'tiny', '50x', '100x', '150x', '200x']
+            small_indicators = ['thumb', 'tiny', '50x', '100x']
             if any(indicator in url_lower for indicator in small_indicators):
+                print(f"Invalid URL (contains small image indicator): {url}")
                 return False
             
             return True

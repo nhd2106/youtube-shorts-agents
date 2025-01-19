@@ -1,65 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube Shorts Generator</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100">
+    <link
+      href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="bg-gray-100">
     <div class="min-h-screen flex flex-col">
-        <!-- Header -->
-        <header class="bg-white shadow-sm">
-            <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center">
-                        <span class="text-2xl font-bold text-gray-900">YouTube Shorts Generator</span>
-                    </div>
-                </div>
-            </nav>
-        </header>
-
-        <!-- Main Content -->
-        <main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <div class="max-w-3xl mx-auto">
-                <!-- Status Card -->
-                <div class="bg-white shadow rounded-lg p-6 mb-8">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">System Status</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-green-50 p-4 rounded-md">
-                            <p class="text-green-700">API Status: Active</p>
-                        </div>
-                        <div class="bg-blue-50 p-4 rounded-md">
-                            <p class="text-blue-700">Service: Running</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- API Endpoints -->
-                <div class="bg-white shadow rounded-lg p-6">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Available Endpoints</h2>
-                    <div class="space-y-4">
-                        <div class="border-l-4 border-indigo-500 pl-4">
-                            <h3 class="font-medium text-gray-900">POST /generate</h3>
-                            <p class="text-gray-600 mt-1">Generate a new YouTube Short video</p>
-                        </div>
-                        <div class="border-l-4 border-indigo-500 pl-4">
-                            <h3 class="font-medium text-gray-900">POST /upload</h3>
-                            <p class="text-gray-600 mt-1">Upload a video to YouTube</p>
-                        </div>
-                    </div>
-                </div>
+      <!-- Header -->
+      <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div class="flex justify-between items-center">
+            <div class="flex items-center">
+              <span class="text-2xl font-bold text-gray-900"
+                >YouTube Shorts Generator</span
+              >
             </div>
-        </main>
+          </div>
+        </nav>
+      </header>
 
-        <!-- Footer -->
-        <footer class="bg-white border-t border-gray-200">
-            <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                <p class="text-center text-gray-500 text-sm">
-                    &copy; 2024 YouTube Shorts Generator. All rights reserved.
+      <!-- Main Content -->
+      <main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="max-w-3xl mx-auto">
+          <!-- Status Card -->
+          <div class="bg-white shadow rounded-lg p-6 mb-8">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">
+              System Status
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-green-50 p-4 rounded-md">
+                <p class="text-green-700">API Status: Active</p>
+              </div>
+              <div class="bg-blue-50 p-4 rounded-md">
+                <p class="text-blue-700">Service: Running</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- API Endpoints -->
+          <div class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">
+              Available Endpoints
+            </h2>
+            <div class="space-y-4">
+              <div class="border-l-4 border-indigo-500 pl-4">
+                <h3 class="font-medium text-gray-900">POST /generate</h3>
+                <p class="text-gray-600 mt-1">
+                  Generate a new YouTube Short video
                 </p>
+              </div>
+              <div class="border-l-4 border-indigo-500 pl-4">
+                <h3 class="font-medium text-gray-900">POST /upload</h3>
+                <p class="text-gray-600 mt-1">Upload a video to YouTube</p>
+              </div>
             </div>
-        </footer>
+          </div>
+        </div>
+      </main>
+
+      <!-- Footer -->
+      <footer class="bg-white border-t border-gray-200">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+          <p class="text-center text-gray-500 text-sm">
+            &copy; 2024 YouTube Shorts Generator. All rights reserved.
+          </p>
+        </div>
+      </footer>
     </div>
-</body>
+  </body>
 </html>

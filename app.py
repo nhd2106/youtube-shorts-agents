@@ -329,7 +329,7 @@ async def generate_content_video(
         )
         
         # Calculate required number of images based on video format
-        required_images = 9 if video_format == "shorts" else 18
+        required_images = 10 if video_format == "shorts" else 20
         
         # Process extracted images from URL if available
         image_paths = []
@@ -480,6 +480,5 @@ if __name__ == '__main__':
     app.run(
         host='0.0.0.0',  # Bind to all available network interfaces
         port=port,
-        debug=True,
         threaded=True    # Enable threading for better concurrent request handling
     )

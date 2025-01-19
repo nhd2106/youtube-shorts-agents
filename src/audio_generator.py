@@ -5,7 +5,18 @@ from openai import OpenAI
 from pathlib import Path
 import hashlib
 import json
-from elevenlabs import ElevenLabs
+import os
+from typing import Optional
+
+# Try to import elevenlabs with fallback for missing metadata
+try:
+    from elevenlabs import ElevenLabs
+except ImportError as e:
+    if "No package metadata was found for elevenlabs" in str(e):
+        # Manually import required components if metadata is missing
+        from elevenlabs.client import ElevenLabs
+    else:
+        raise
 
 class AudioGenerator:
     AVAILABLE_MODELS = {
@@ -37,6 +48,7 @@ class AudioGenerator:
         self.openai_client = None
         self.elevenlabs_client = None
         self.semaphore = asyncio.Semaphore(3)  # Limit concurrent API calls
+        self.client = None
 
     def _init_openai_client(self, api_key: str):
         """Initialize OpenAI client with API key"""

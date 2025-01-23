@@ -124,7 +124,7 @@ class ContentGenerator:
                 element.decompose()
             
             print(f"\nStarting image extraction for URL: {url}")
-            image_urls = set()
+            image_urls = []  # Changed to list to maintain order
             
             # Try site-specific extraction first
             site_type = self._detect_site_type(url)
@@ -134,7 +134,7 @@ class ContentGenerator:
                 try:
                     extractor_method = getattr(self, f'_extract_{site_type}_images')
                     site_images = extractor_method(soup, url)
-                    image_urls.update(site_images)
+                    image_urls.extend(reversed(site_images))  # Reverse site-specific images
                     print(f"Found {len(site_images)} images using {site_type} specific extractor")
                 except Exception as e:
                     print(f"Error in site-specific extraction: {str(e)}")
@@ -145,7 +145,7 @@ class ContentGenerator:
                 
                 # Priority 1: Find the main article content container
                 main_content_selectors = [
-                     'article.content-detail',
+                    'article.content-detail',
                     'article.fck_detail',
                     'div.fck_detail',
                     'article.article-detail',
@@ -177,18 +177,22 @@ class ContentGenerator:
                         print(f"Error with selector {selector}: {str(e)}")
                 
                 if main_content:
-                    # Extract images from main content
+                    # Extract images from main content in reverse order
+                    temp_images = []
                     for img in main_content.find_all('img'):
                         for attr in ['data-src', 'src', 'data-original', 'data-lazy-src', 'data-lazy']:
                             try:
                                 src = img.get(attr)
                                 if src:
                                     src = self._clean_url(src, url)
-                                    if self._is_valid_image_url(src):
-                                        image_urls.add(src)
+                                    if self._is_valid_image_url(src) and src not in temp_images:
+                                        temp_images.append(src)
                                         break
                             except Exception as e:
                                 print(f"Error processing image attribute {attr}: {str(e)}")
+                    
+                    # Add images in reverse order
+                    image_urls.extend(reversed(temp_images))
                 
                 # Try meta tags if still no images
                 if not image_urls:
@@ -198,6 +202,7 @@ class ContentGenerator:
                         'itemprop': ['image']
                     }
                     
+                    meta_images = []
                     for attr, values in meta_selectors.items():
                         for value in values:
                             try:
@@ -205,13 +210,16 @@ class ContentGenerator:
                                     content = meta.get('content')
                                     if content:
                                         src = self._clean_url(content, url)
-                                        if self._is_valid_image_url(src):
-                                            image_urls.add(src)
+                                        if self._is_valid_image_url(src) and src not in meta_images:
+                                            meta_images.append(src)
                             except Exception as e:
                                 print(f"Error processing meta tag {attr}={value}: {str(e)}")
+                    
+                    # Add meta images in reverse order
+                    image_urls.extend(reversed(meta_images))
             
             print(f"Found {len(image_urls)} unique images from {url}")
-            return list(image_urls)
+            return image_urls
             
         except Exception as e:
             print(f"Error extracting images from URL: {str(e)}")
@@ -229,12 +237,12 @@ class ContentGenerator:
             return 'nhandan'
         return 'generic'
 
-    def _extract_vnexpress_images(self, soup: BeautifulSoup, base_url: str) -> set:
+    def _extract_vnexpress_images(self, soup: BeautifulSoup, base_url: str) -> list:
         """Extract images specifically from VnExpress"""
-        image_urls = set()
+        image_urls = []
         try:
-            # Find all figure elements with specific VnExpress classes
-            figures = soup.find_all(['figure', 'div'], class_=['fig-picture', 'item-news-common', 'image', 'pic'])
+            # Find all figure elements with specific VnExpress classes in reverse order
+            figures = list(reversed(soup.find_all(['figure', 'div'], class_=['fig-picture', 'item-news-common', 'image', 'pic'])))
             
             for fig in figures:
                 # Try to find picture element first
@@ -248,8 +256,8 @@ class ContentGenerator:
                             urls = [s.strip().split(' ')[0] for s in srcset.split(',')]
                             if urls:
                                 src = self._clean_url(urls[-1], base_url)
-                                if self._is_valid_image_url(src):
-                                    image_urls.add(src)
+                                if self._is_valid_image_url(src) and src not in image_urls:
+                                    image_urls.append(src)
                 
                 # Try to find img element
                 img = fig.find('img')
@@ -258,20 +266,20 @@ class ContentGenerator:
                         src = img.get(attr)
                         if src:
                             src = self._clean_url(src, base_url)
-                            if self._is_valid_image_url(src):
-                                image_urls.add(src)
+                            if self._is_valid_image_url(src) and src not in image_urls:
+                                image_urls.append(src)
                                 break
             
-            # Try to find images in specific VnExpress containers
-            containers = soup.find_all(['div', 'article'], class_=['fig-picture', 'fck_detail', 'content-detail'])
+            # Try to find images in specific VnExpress containers in reverse order
+            containers = list(reversed(soup.find_all(['div', 'article'], class_=['fig-picture', 'fck_detail', 'content-detail'])))
             for container in containers:
-                for img in container.find_all('img'):
+                for img in reversed(container.find_all('img')):
                     for attr in ['data-src', 'src', 'data-original']:
                         src = img.get(attr)
                         if src:
                             src = self._clean_url(src, base_url)
-                            if self._is_valid_image_url(src):
-                                image_urls.add(src)
+                            if self._is_valid_image_url(src) and src not in image_urls:
+                                image_urls.append(src)
                                 break
         
         except Exception as e:
@@ -279,12 +287,12 @@ class ContentGenerator:
         
         return image_urls
 
-    def _extract_dantri_images(self, soup: BeautifulSoup, base_url: str) -> set:
+    def _extract_dantri_images(self, soup: BeautifulSoup, base_url: str) -> list:
         """Extract images specifically from Dan Tri"""
-        image_urls = set()
+        image_urls = []
         try:
-            # Find all figure elements with Dan Tri specific classes
-            figures = soup.find_all(['figure', 'div'], class_=['image', 'article-thumb', 'dt-image'])
+            # Find all figure elements with Dan Tri specific classes in reverse order
+            figures = list(reversed(soup.find_all(['figure', 'div'], class_=['image', 'article-thumb', 'dt-image'])))
             for fig in figures:
                 img = fig.find('img')
                 if img:
@@ -292,19 +300,19 @@ class ContentGenerator:
                         src = img.get(attr)
                         if src:
                             src = self._clean_url(src, base_url)
-                            if self._is_valid_image_url(src):
-                                image_urls.add(src)
+                            if self._is_valid_image_url(src) and src not in image_urls:
+                                image_urls.append(src)
                                 break
         except Exception as e:
             print(f"Error extracting Dan Tri images: {str(e)}")
         return image_urls
 
-    def _extract_nhandan_images(self, soup: BeautifulSoup, base_url: str) -> set:
+    def _extract_nhandan_images(self, soup: BeautifulSoup, base_url: str) -> list:
         """Extract images specifically from Nhan Dan"""
-        image_urls = set()
+        image_urls = []
         try:
-            # Find all figure elements with Nhan Dan specific classes
-            figures = soup.find_all(['figure', 'div'], class_=['article-image', 'image', 'detail-image'])
+            # Find all figure elements with Nhan Dan specific classes in reverse order
+            figures = list(reversed(soup.find_all(['figure', 'div'], class_=['article-image', 'image', 'detail-image'])))
             for fig in figures:
                 img = fig.find('img')
                 if img:
@@ -312,8 +320,8 @@ class ContentGenerator:
                         src = img.get(attr)
                         if src:
                             src = self._clean_url(src, base_url)
-                            if self._is_valid_image_url(src):
-                                image_urls.add(src)
+                            if self._is_valid_image_url(src) and src not in image_urls:
+                                image_urls.append(src)
                                 break
         except Exception as e:
             print(f"Error extracting Nhan Dan images: {str(e)}")
@@ -694,7 +702,7 @@ Note: Exclude emojis, icons, or special characters from the script content.'''
             return None
 
     def _resize_and_crop(self, image: Image.Image) -> Image.Image:
-        """Resize and crop image to match video dimensions while maintaining aspect ratio"""
+        """Resize image to match video dimensions while preserving content using letterboxing/pillarboxing"""
         if not hasattr(self, 'WIDTH') or not hasattr(self, 'HEIGHT'):
             raise ValueError("Video dimensions not set. Call set_format() first.")
             
@@ -705,16 +713,27 @@ Note: Exclude emojis, icons, or special characters from the script content.'''
         width, height = image.size
         current_ratio = width / height
         
+        # Calculate dimensions to fit image entirely within video frame
         if current_ratio > target_ratio:
-            # Image is wider than needed
-            new_width = int(height * target_ratio)
-            left = (width - new_width) // 2
-            image = image.crop((left, 0, left + new_width, height))
+            # Image is wider - fit to width
+            new_width = self.WIDTH
+            new_height = int(new_width / current_ratio)
         else:
-            # Image is taller than needed
-            new_height = int(width / target_ratio)
-            top = (height - new_height) // 2
-            image = image.crop((0, top, width, top + new_height))
+            # Image is taller - fit to height
+            new_height = self.HEIGHT
+            new_width = int(new_height * current_ratio)
         
-        # Resize to target dimensions using Lanczos resampling
-        return image.resize((self.WIDTH, self.HEIGHT), Image.Resampling.LANCZOS)
+        # Resize using high-quality Lanczos resampling
+        resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Create new image with video dimensions and black background
+        final_image = Image.new('RGB', (self.WIDTH, self.HEIGHT), (0, 0, 0))
+        
+        # Calculate position to center the resized image
+        paste_x = (self.WIDTH - new_width) // 2
+        paste_y = (self.HEIGHT - new_height) // 2
+        
+        # Paste resized image onto black background
+        final_image.paste(resized_image, (paste_x, paste_y))
+        
+        return final_image

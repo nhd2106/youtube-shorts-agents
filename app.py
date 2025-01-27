@@ -15,9 +15,13 @@ import time
 from datetime import datetime
 import threading
 import traceback
+import sys
 
 app = Flask(__name__)
 CORS(app)
+
+# Enable debug mode and hot reload
+app.debug = True
 
 # Initialize generators and request tracker
 content_generator = ContentGenerator()
@@ -220,6 +224,20 @@ def prepare_video_data() -> tuple[Any, int]:
             request_tracker.update_request(request_id, status=RequestStatus.FAILED, error=str(e))
         return jsonify({'error': str(e)}), 500
 
+def get_app_data_dir() -> str:
+    """Get the application data directory"""
+    if getattr(sys, 'frozen', False):
+        # When running as PyInstaller bundle on macOS, use ~/Library/Application Support
+        home = os.path.expanduser('~')
+        app_data = os.path.join(home, 'Library', 'Application Support', 'youtube-shorts-agents')
+    else:
+        # In development, use current directory
+        app_data = os.getcwd()
+    
+    # Ensure the directory exists
+    os.makedirs(app_data, exist_ok=True)
+    return app_data
+
 def get_request_directory(request_id: str, content_type: str = None) -> str:
     """
     Get the directory path for a specific request and content type
@@ -231,31 +249,128 @@ def get_request_directory(request_id: str, content_type: str = None) -> str:
     Returns:
         Path to the request-specific directory
     """
-    base_dir = os.path.join('contents', request_id)
-    if content_type:
-        base_dir = os.path.join(base_dir, content_type)
-    
-    # Create directory if it doesn't exist
-    os.makedirs(base_dir, exist_ok=True)
-    return base_dir
+    try:
+        # Get base application data directory
+        base_path = get_app_data_dir()
+        print(f"App data directory: {base_path}")
+        
+        # Create contents directory in the app data directory
+        contents_dir = os.path.join(base_path, 'contents')
+        print(f"Contents directory path: {contents_dir}")
+        
+        # Create the full path
+        base_dir = os.path.join(contents_dir, request_id)
+        if content_type:
+            base_dir = os.path.join(base_dir, content_type)
+        
+        print(f"Creating directory at: {base_dir}")
+        # Create directory if it doesn't exist
+        os.makedirs(base_dir, exist_ok=True)
+        
+        # Verify directory was created and is writable
+        if not os.path.exists(base_dir):
+            print(f"Failed to create directory: {base_dir}")
+            raise OSError(f"Failed to create directory: {base_dir}")
+        
+        # Test write permissions
+        test_file = os.path.join(base_dir, '.test')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            print(f"Directory is writable: {base_dir}")
+        except Exception as e:
+            print(f"Directory is not writable: {base_dir}, Error: {str(e)}")
+            raise
+            
+        return base_dir
+    except Exception as e:
+        print(f"Error in get_request_directory: {str(e)}")
+        print(f"Stack trace: {traceback.format_exc()}")
+        raise
 
 @app.route('/api/download/<request_id>/<content_type>/<path:filename>')
 def download_file(request_id: str, content_type: str, filename: str) -> Any:
     try:
-        # Get the request-specific directory for the content type
-        directory = get_request_directory(request_id, content_type)
-        file_path = os.path.join(directory, filename)
+        print(f"\nDownload request - ID: {request_id}, Type: {content_type}, File: {filename}")
         
-        if not os.path.exists(file_path):
+        # Map content types to directories
+        content_type_map = {
+            'video': 'video',
+            'audio': 'audio',
+            'script': 'script',
+            'thumbnail': 'video',  # Thumbnails are stored in video directory
+            'image': 'images'
+        }
+        
+        if content_type not in content_type_map:
+            print(f"Invalid content type: {content_type}")
+            return jsonify({'error': 'Invalid content type'}), 400
+            
+        # Get the request-specific directory for the content type
+        directory = get_request_directory(request_id, content_type_map[content_type])
+        print(f"Got directory path: {directory}")
+        
+        # Handle thumbnail files
+        if content_type == 'thumbnail':
+            # Remove any existing extension and add _thumbnail.jpg
+            base_name = os.path.splitext(filename)[0]
+            filename = f"{base_name}_thumbnail.jpg"
+            print(f"Looking for thumbnail: {filename}")
+        
+        file_path = os.path.join(directory, filename)
+        print(f"Constructed file path: {file_path}")
+        
+        # Verify the file exists and is within the allowed directory
+        abs_file_path = os.path.abspath(file_path)
+        abs_directory = os.path.abspath(directory)
+        
+        print(f"Absolute file path: {abs_file_path}")
+        print(f"Absolute directory: {abs_directory}")
+        
+        if not os.path.exists(abs_file_path):
+            print(f"File not found: {abs_file_path}")
+            # List directory contents to help debug
+            if os.path.exists(abs_directory):
+                print(f"Directory contents of {abs_directory}:")
+                for f in os.listdir(abs_directory):
+                    print(f"  - {f}")
             return jsonify({'error': 'File not found'}), 404
+            
+        if not abs_file_path.startswith(abs_directory):
+            print(f"Invalid file path: {abs_file_path}")
+            return jsonify({'error': 'Invalid file path'}), 403
 
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=filename
-        )
+        # Check file permissions
+        if not os.access(abs_file_path, os.R_OK):
+            print(f"File not readable: {abs_file_path}")
+            return jsonify({'error': 'File not readable'}), 403
+
+        print(f"Serving file: {abs_file_path}")
+        
+        # Set appropriate MIME type based on content type
+        mime_types = {
+            'video': 'video/mp4',
+            'audio': 'audio/mpeg',
+            'script': 'text/plain',
+            'thumbnail': 'image/jpeg',
+            'image': 'image/jpeg'
+        }
+        
+        try:
+            return send_file(
+                abs_file_path,
+                as_attachment=True,
+                download_name=filename,
+                mimetype=mime_types.get(content_type, 'application/octet-stream')
+            )
+        except Exception as e:
+            print(f"Error in send_file: {str(e)}")
+            raise
 
     except Exception as e:
+        print(f"Error serving file: {str(e)}")
+        print(f"Stack trace: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 async def generate_content_video(
@@ -347,25 +462,42 @@ async def generate_content_video(
                 except Exception as e:
                     print(f"Error processing image from URL {url}: {str(e)}")
                     continue
+            
+            print(f"Successfully processed {len(image_paths)} images from URLs")
         
-        # Generate additional images only if we don't have enough extracted images
-        if len(image_paths) < required_images and not content.get('image_urls'):
-            print(f"Not enough extracted images ({len(image_paths)}), generating {required_images - len(image_paths)} additional images")
-            # Use a subset of prompts based on remaining count
-            selected_prompts = prompts[:required_images - len(image_paths)]
+        # Generate additional images if we don't have enough
+        if len(image_paths) < required_images:
+            remaining_images = required_images - len(image_paths)
+            print(f"Need {remaining_images} more images. Generating with AI...")
+            
+            # Use prompts for the remaining images needed
+            selected_prompts = prompts[:remaining_images]
+            if not selected_prompts:
+                print("No prompts available, generating new ones...")
+                # If we don't have enough prompts, generate more
+                selected_prompts = await video_generator.generate_prompts_with_openai(
+                    content['script'], 
+                    api_keys,
+                    count=remaining_images
+                )
+            
             additional_images = await image_handler.generate_background_images(
                 selected_prompts,
                 request_id,
                 output_dir=dirs[1],  # images dir
                 api_keys=api_keys
             )
+            print(f"Generated {len(additional_images)} additional images")
             image_paths.extend(additional_images)
-        else:
-            print(f"Using {len(image_paths)} extracted images, skipping AI image generation")
-            # If we have more images than needed, use only the required number
-            if len(image_paths) > required_images:
-                print(f"Using only the first {required_images} images")
-                image_paths = image_paths[:required_images]
+        elif len(image_paths) > required_images:
+            print(f"Using only the first {required_images} images")
+            image_paths = image_paths[:required_images]
+        
+        print(f"Final image count: {len(image_paths)}")
+        
+        # Verify we have enough images
+        if len(image_paths) < required_images:
+            raise Exception(f"Failed to generate enough images. Required: {required_images}, Got: {len(image_paths)}")
         
         # Verify audio file exists before proceeding
         if not os.path.exists(audio_path):
@@ -452,7 +584,9 @@ def save_content_to_file(
 ) -> str:
     """Save generated content to a text file with additional metadata"""
     if not output_dir:
-        save_dir = os.path.join("contents", "script")
+        # Use app data directory if no output dir specified
+        app_data = get_app_data_dir()
+        save_dir = os.path.join(app_data, 'contents', 'script')
     else:
         save_dir = output_dir
     os.makedirs(save_dir, exist_ok=True)
@@ -475,10 +609,96 @@ def save_content_to_file(
     
     return filepath
 
+def delete_request_directory(request_id: str) -> None:
+    """Delete all content associated with a request ID"""
+    try:
+        base_path = get_app_data_dir()
+        contents_dir = os.path.join(base_path, 'contents')
+        
+        # List of directories to check and delete
+        directories = [
+            os.path.join(contents_dir, request_id),  # Main request directory
+            os.path.join(contents_dir, 'video', request_id),  # Video directory (includes thumbnails)
+            os.path.join(contents_dir, 'audio', request_id),  # Audio directory
+            os.path.join(contents_dir, 'images', request_id),  # Images directory
+            os.path.join(contents_dir, 'script', request_id)   # Script directory
+        ]
+        
+        deleted = False
+        for directory in directories:
+            if os.path.exists(directory):
+                print(f"Deleting directory: {directory}")
+                import shutil
+                shutil.rmtree(directory)
+                print(f"Successfully deleted directory: {directory}")
+                deleted = True
+                
+        if not deleted:
+            print(f"No directories found for request ID: {request_id}")
+            raise FileNotFoundError(f"No content found for request ID: {request_id}")
+            
+    except Exception as e:
+        print(f"Error deleting directory: {str(e)}")
+        raise
+
+@app.route('/api/content/<request_id>', methods=['DELETE'])
+def delete_content(request_id: str) -> tuple[Any, int]:
+    """Delete all content associated with a request ID"""
+    try:
+        print(f"\nDelete request - ID: {request_id}")
+        success = False
+        
+        # Try to delete from request tracker if it exists
+        request_data = request_tracker.get_request(request_id)
+        if request_data:
+            request_tracker.delete_request(request_id)
+            success = True
+        
+        # Try to delete files regardless of request tracker status
+        try:
+            delete_request_directory(request_id)
+            success = True
+        except FileNotFoundError as e:
+            print(f"Directory not found: {str(e)}")
+            # Only return 404 if both tracker and files don't exist
+            if not success:
+                return jsonify({'error': 'Content not found'}), 404
+        except PermissionError as e:
+            print(f"Permission error: {str(e)}")
+            return jsonify({'error': 'Permission denied when deleting files'}), 403
+        except Exception as e:
+            print(f"Error deleting files: {str(e)}")
+            # If we deleted from tracker but failed to delete files, still return success
+            if not success:
+                return jsonify({'error': f'Error deleting files: {str(e)}'}), 500
+        
+        return jsonify({
+            'message': 'Content deleted successfully',
+            'request_id': request_id
+        }), 200
+        
+    except Exception as e:
+        print(f"Error in delete_content: {str(e)}")
+        print(f"Stack trace: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5123))
+    print(f"\nStarting server...")
+    print(f"Running mode: {'PyInstaller bundle' if getattr(sys, 'frozen', False) else 'Development'}")
+    print(f"Working directory: {os.getcwd()}")
+    if getattr(sys, 'frozen', False):
+        print(f"Executable path: {sys.executable}")
+        print(f"App data directory: {get_app_data_dir()}")
+    print(f"Port: {port}\n")
+    
+    # Ensure app data directory exists
+    app_data = get_app_data_dir()
+    print(f"Using app data directory: {app_data}")
+    
     app.run(
-        host='0.0.0.0',  # Bind to all available network interfaces
+        host='0.0.0.0',
         port=port,
-        threaded=True    # Enable threading for better concurrent request handling
+        debug=True,
+        use_reloader=True
     )

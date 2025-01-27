@@ -87,9 +87,24 @@ class AudioGenerator:
         model: str = "edge",
         voice: str = None,
         output_dir: str = None,
-        api_keys: dict = None
-    ) -> str:
-        """Generate audio file from script with caching"""
+        api_keys: dict = None,
+        return_timing: bool = False
+    ) -> str | tuple[str, list[dict]]:
+        """Generate audio from text using specified TTS model.
+        
+        Args:
+            script: Text to convert to speech
+            filename: Output filename without extension
+            model: TTS model to use ('edge', 'gtts', 'openai', 'elevenlabs')
+            voice: Voice ID/name for the model
+            output_dir: Output directory (default: contents/audio)
+            api_keys: Dictionary of API keys for services
+            return_timing: Whether to return timing information
+            
+        Returns:
+            If return_timing is False: Path to generated audio file
+            If return_timing is True: Tuple of (audio_path, timing_info)
+        """
         try:
             # Validate model and voice selection
             if model not in self.AVAILABLE_MODELS:
@@ -106,18 +121,9 @@ class AudioGenerator:
             cached_path = self._get_cached_audio(cache_key)
             
             if cached_path:
-                # Use provided output directory or default
-                if not output_dir:
-                    output_dir = "contents/audio"
-                output_dir = Path(output_dir)
-                output_dir.mkdir(parents=True, exist_ok=True)
-                
-                output_path = output_dir / f"{filename}.mp3"
-                
-                # Copy from cache to output directory
-                import shutil
-                shutil.copy2(cached_path, output_path)
-                return str(output_path)
+                print("Using cached audio file")
+                if not return_timing:
+                    return str(cached_path)
 
             async with self.semaphore:
                 # Use provided output directory or default
@@ -157,7 +163,12 @@ class AudioGenerator:
                         text=script,
                         voice_id=voice,
                         model_id="eleven_turbo_v2_5",
-                        output_format="mp3_22050_32"
+                        output_format="mp3_22050_32",
+                        voice_settings={
+                            "use_speaker_boost": True,
+                            "stability": 0.5,
+                            "similarity_boost": 0.5
+                        }
                     )
                     
                     # Save the streaming response to the output file
@@ -172,6 +183,13 @@ class AudioGenerator:
                 # Cache the generated audio
                 import shutil
                 shutil.copy2(output_path, cache_path)
+                
+                if return_timing:
+                    # Import VideoGenerator here to avoid circular imports
+                    from .video_generator import VideoGenerator
+                    video_gen = VideoGenerator()
+                    timing_info = await video_gen.get_audio_timing_info(str(output_path), script)
+                    return str(output_path), timing_info
                 
                 return str(output_path)
             

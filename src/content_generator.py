@@ -62,9 +62,18 @@ class ContentGenerator:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            # Create a session with custom headers
+            # Create a session with custom headers and longer timeouts
             session = requests.Session()
             session.verify = False
+            
+            # Set longer timeouts (connect_timeout, read_timeout)
+            adapter = requests.adapters.HTTPAdapter(
+                max_retries=3,  # Retry 3 times
+                pool_connections=10,
+                pool_maxsize=10
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
             
             # Update headers based on the site
             headers = self.headers.copy()
@@ -79,9 +88,19 @@ class ContentGenerator:
             
             session.headers.update(headers)
             
-            # Make the request with multiple encoding attempts
-            response = session.get(url, timeout=15)
-            response.raise_for_status()
+            # Make the request with multiple encoding attempts and longer timeout
+            try:
+                response = session.get(url, timeout=(15, 30))  # (connect timeout, read timeout)
+                response.raise_for_status()
+            except requests.exceptions.Timeout:
+                print(f"Request timed out for {url}. Retrying with longer timeout...")
+                # Retry once with even longer timeout
+                response = session.get(url, timeout=(30, 60))
+                response.raise_for_status()
+            except requests.exceptions.SSLError:
+                print(f"SSL Error for {url}. Retrying without verification...")
+                response = session.get(url, verify=False, timeout=(15, 30))
+                response.raise_for_status()
             
             # Try different encodings if content seems garbled
             content = None
@@ -416,33 +435,138 @@ class ContentGenerator:
     async def _extract_content_from_url(self, url: str) -> Dict[str, Any]:
         """Extract content and images from a URL"""
         try:
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
+            # Create session with custom headers and longer timeouts
+            session = requests.Session()
+            session.verify = False
+            
+            # Set longer timeouts and retries
+            adapter = requests.adapters.HTTPAdapter(
+                max_retries=3,
+                pool_connections=10,
+                pool_maxsize=10
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            session.headers.update(self.headers)
+            
+            # Try to get content with multiple timeout settings
+            try:
+                response = session.get(url, timeout=(15, 30))  # (connect timeout, read timeout)
+                response.raise_for_status()
+            except requests.exceptions.Timeout:
+                print(f"Request timed out for {url}. Retrying with longer timeout...")
+                response = session.get(url, timeout=(30, 60))
+                response.raise_for_status()
+            except requests.exceptions.SSLError:
+                print(f"SSL Error for {url}. Retrying without verification...")
+                response = session.get(url, verify=False, timeout=(15, 30))
+                response.raise_for_status()
+            
+            # Try different encodings if content seems garbled
+            content = None
+            encodings = ['utf-8', 'utf-16', 'windows-1252', 'latin1', 'iso-8859-1']
+            
+            for encoding in encodings:
+                try:
+                    response.encoding = encoding
+                    content = response.text
+                    if re.search(r'<html|<body|<div', content, re.IGNORECASE):
+                        break
+                except UnicodeDecodeError:
+                    continue
+            
+            if not content:
+                raise ValueError("Could not decode content with any known encoding")
+            
+            # Parse with BeautifulSoup using different parsers
+            soup = None
+            parsers = ['html.parser', 'lxml', 'html5lib']
+            
+            for parser in parsers:
+                try:
+                    soup = BeautifulSoup(content, parser)
+                    if soup.find(['body', 'div']):
+                        break
+                except Exception as e:
+                    print(f"Parser {parser} failed: {str(e)}")
+                    continue
+            
+            if not soup:
+                raise ValueError("Could not parse HTML content")
             
             # Extract title
-            title = soup.title.string if soup.title else ""
+            title = ""
+            if soup.title:
+                title = soup.title.string
+            else:
+                # Try common title selectors if <title> tag is missing
+                title_selectors = [
+                    'h1.title',
+                    'h1.article-title',
+                    'h1.entry-title',
+                    '.article-header h1',
+                    '.post-title',
+                    'article h1'
+                ]
+                for selector in title_selectors:
+                    title_elem = soup.select_one(selector)
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        break
             
-            # Extract main content (focusing on article or main content areas)
+            # Extract main content
             content = ""
-            main_content = soup.find('article') or soup.find('main') or soup.find('div', class_=re.compile(r'content|article|post'))
-            if main_content:
-                # Remove script and style elements
-                for element in main_content(['script', 'style']):
-                    element.decompose()
-                content = main_content.get_text(separator='\n').strip()
+            # Remove unwanted elements
+            for element in soup.find_all(['script', 'style', 'noscript', 'iframe', 'header', 'footer', 'nav']):
+                element.decompose()
+            
+            # Try to find main content using common selectors
+            content_selectors = [
+                'article.content-detail',
+                'article.fck_detail',
+                'div.fck_detail',
+                'article.article-detail',
+                'div.article-body',
+                'div.article-content',
+                'div[itemprop="articleBody"]',
+                'div.detail-content',
+                '.article__body',
+                '.article__content',
+                '.post-content',
+                '.entry-content',
+                'article.post',
+                'main article'
+            ]
+            
+            main_content = None
+            for selector in content_selectors:
+                main_content = soup.select_one(selector)
+                if main_content:
+                    # Clean up the content
+                    for tag in main_content.find_all(['script', 'style', 'iframe']):
+                        tag.decompose()
+                    content = main_content.get_text(separator='\n').strip()
+                    break
+            
+            # If no content found with selectors, try to get content from article or main tags
+            if not content:
+                main_content = soup.find('article') or soup.find('main')
+                if main_content:
+                    content = main_content.get_text(separator='\n').strip()
             
             # Extract images
             image_urls = await self._extract_images_from_url(url)
             
             return {
-                'title': title,
-                'content': content,
+                'title': title.strip() if title else '',
+                'content': content.strip() if content else '',
                 'image_urls': image_urls
             }
             
         except Exception as e:
             print(f"Error extracting content from URL: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return {'title': '', 'content': '', 'image_urls': []}
 
     async def generate_content(self, idea: str, video_format: str = "shorts", api_keys: dict = None) -> Content:
@@ -574,6 +698,7 @@ Guidelines for content creation:
 Note: Exclude emojis, icons, or special characters from the script content.'''
 
             # Make the API call
+            print(f"Making API call with system prompt: {idea}")
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",  # or "gpt-3.5-turbo" for lower cost
                 messages=[

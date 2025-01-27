@@ -6,6 +6,7 @@ from PIL import Image
 from pathlib import Path
 from typing import List, Dict, Any
 from openai import AsyncOpenAI
+import multiprocessing
 
 # MoviePy imports
 from moviepy.video.io.VideoFileClip import VideoFileClip
@@ -22,6 +23,10 @@ import whisper
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 import librosa
+
+# Get optimal number of CPU cores for video processing
+CPU_CORES = max(1, multiprocessing.cpu_count() - 1)  # Leave one core free for system
+MEMORY_BUFFER = 0.8  # Use 80% of available memory
 
 class MyBarLogger(ProgressBarLogger):
     def __init__(self, progress_callback=None):
@@ -604,20 +609,34 @@ class VideoGenerator:
             thumbnail_path = thumbnail_dir / f"{filename}_thumb.jpg"
             temp_audio_path = temp_dir / "temp-audio.m4a"
             
-            # Load and preprocess audio
+            # Load and preprocess audio with optimized settings
             print("Loading and preprocessing audio...")
             audio = AudioFileClip(audio_path)
             self.DURATION = audio.duration
             print(f"Audio duration: {self.DURATION}")
             
-            # Get speech-to-text segments
+            # Optimize audio processing
+            audio.write_audiofile(
+                str(temp_audio_path),
+                fps=44100,
+                nbytes=4,
+                codec='aac',
+                bitrate='192k',
+                ffmpeg_params=[
+                    "-strict", "-2",
+                    "-movflags", "+faststart",  # Enable fast start for web playback
+                    "-profile:a", "aac_low",  # Use low complexity AAC profile
+                ]
+            )
+            
+            # Get speech-to-text segments with optimized whisper settings
             print("\nGetting speech-to-text segments...")
             phrase_timings = await self.get_precise_word_timings(audio_path, content['script'])
             if not phrase_timings:
                 print("Falling back to script-based timing...")
             print(f"Generated {len(phrase_timings)} phrase timings")
             
-            # Create background
+            # Create background with optimized image processing
             print("\nCreating background...")
             if background_images and len(background_images) > 0:
                 num_images = len(background_images)
@@ -629,10 +648,11 @@ class VideoGenerator:
                 if not background_clips:
                     raise ValueError("Failed to create background clips")
                 
-                # Concatenate background clips with compose method
+                # Concatenate background clips with optimized method
                 background = concatenate_videoclips(
                     background_clips,
                     method="compose",
+                    bg_color=None  # Transparent background for better composition
                 )
             else:
                 print("No background images provided, using solid color...")
@@ -642,7 +662,7 @@ class VideoGenerator:
                     duration=self.DURATION
                 )
             
-            # Create text clips
+            # Create text clips with optimized settings
             print("\nCreating text clips...")
             text_clips = []
             
@@ -653,55 +673,39 @@ class VideoGenerator:
                 text_clips.append(title_clip)
                 print(f"Added title clip: {content['title']}")
             
-            # Add subtitle clips
+            # Add subtitle clips with batched processing
             print("\nCreating subtitle clips...")
-            for timing in phrase_timings:
-                print(f"Creating clip for text: {timing['word']}")
-                print(f"Start: {timing['start']}, Duration: {timing['duration']}")
-                
-                clip = self.create_text_clip(
-                    timing['word'],
-                    start_time=timing['start'],
-                    duration=timing['duration']
-                )
-                
-                if clip:
-                    text_clips.append(clip)
-                    print(f"Added subtitle clip: {timing['word']}")
-                else:
-                    print(f"Failed to create clip for: {timing['word']}")
+            batch_size = 10  # Process 10 clips at a time
+            for i in range(0, len(phrase_timings), batch_size):
+                batch = phrase_timings[i:i + batch_size]
+                for timing in batch:
+                    clip = self.create_text_clip(
+                        timing['word'],
+                        start_time=timing['start'],
+                        duration=timing['duration']
+                    )
+                    if clip:
+                        text_clips.append(clip)
             
             print(f"\nCreated {len(text_clips)} text clips")
             
-            # Create final composition
+            # Create final composition with optimized settings
             print("\nCreating final composition...")
-            # First create a composite of all text clips
             text_composite = CompositeVideoClip(
                 text_clips,
                 size=(self.WIDTH, self.HEIGHT)
             ).with_duration(self.DURATION)
             
-            # Then combine background with text composite
             final = CompositeVideoClip(
                 [background, text_composite],
                 size=(self.WIDTH, self.HEIGHT)
             ).with_duration(self.DURATION)
             
-            # Add audio
-            print("\nPreprocessing audio...")
-            audio.write_audiofile(
-                str(temp_audio_path),
-                fps=44100,
-                nbytes=4,
-                codec='aac',
-                bitrate='192k',
-                ffmpeg_params=["-strict", "-2"]
-            )
-            
+            # Add processed audio
             processed_audio = AudioFileClip(str(temp_audio_path))
             final = final.with_audio(processed_audio)
             
-            # Write final video
+            # Write final video with optimized encoding settings
             print(f"\nWriting video to: {video_path}")
             final.write_videofile(
                 str(video_path),
@@ -710,23 +714,42 @@ class VideoGenerator:
                 audio_codec='aac',
                 audio_bitrate='192k',
                 bitrate='8000k',
-                threads=2,
+                threads=CPU_CORES,  # Use optimal number of CPU cores
+                preset='faster',  # Balanced preset for speed/quality
+                ffmpeg_params=[
+                    "-movflags", "+faststart",  # Enable fast start for web playback
+                    "-profile:v", "high",  # High quality profile
+                    "-level", "4.0",  # Compatibility level
+                    "-pix_fmt", "yuv420p",  # Standard pixel format
+                    "-bf", "2",  # Use 2 B-frames for better compression
+                    "-g", "30",  # GOP size = fps for better seeking
+                    "-maxrate", "10000k",  # Max bitrate
+                    "-bufsize", "20000k",  # Buffer size
+                ],
                 logger=MyBarLogger(progress_callback)
             )
             
-            # Clean up
+            # Clean up resources
             audio.close()
             processed_audio.close()
             final.close()
             if os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
             
-            # Generate thumbnail from the first frame
+            # Generate optimized thumbnail
             print("\nGenerating thumbnail...")
             video_clip = VideoFileClip(str(video_path))
-            thumbnail = video_clip.get_frame(0)  # Get first frame
+            thumbnail = video_clip.get_frame(0)
             thumbnail_img = Image.fromarray(np.uint8(thumbnail))
-            thumbnail_img.save(str(thumbnail_path), quality=95)
+            
+            # Optimize thumbnail quality/size ratio
+            thumbnail_img.save(
+                str(thumbnail_path),
+                format='JPEG',
+                quality=85,  # Good quality-size ratio
+                optimize=True,  # Enable optimization
+                progressive=True  # Progressive loading
+            )
             video_clip.close()
             print(f"Thumbnail saved to: {thumbnail_path}")
             
@@ -1210,3 +1233,66 @@ class VideoGenerator:
             adjusted_segments.append(segment)
         
         return adjusted_segments
+
+    async def get_audio_timing_info(self, audio_path: str, script: str) -> list[dict]:
+        """Get timing information from an audio file and script.
+        Returns a list of segments with timing information for text display.
+        Each segment contains: word (text), start (time), end (time), and duration.
+        Uses speech-to-text recognition for accurate timing.
+        """
+        try:
+            # Get speech-to-text segments for accurate timing
+            segments = await self.get_speech_to_text_segments(audio_path)
+            
+            if not segments:
+                print("Could not get speech-to-text segments")
+                return []
+                
+            # Align segments with script text
+            aligned_segments = self._align_subtitles_with_timing(segments, script)
+            
+            # Adjust gaps between segments for smoother transitions
+            return self._adjust_timing_gaps(aligned_segments)
+            
+        except Exception as e:
+            print(f"Error getting audio timing info: {str(e)}")
+            traceback.print_exc()
+            return []
+
+    def create_text_clips_from_timing(self, timing_info: list[dict], title: str = None) -> list[TextClip]:
+        """Create text clips from timing information.
+        
+        Args:
+            timing_info: List of timing segments (word, start, end, duration)
+            title: Optional title to display throughout video
+            
+        Returns:
+            List of text clips with proper timing
+        """
+        text_clips = []
+        
+        # Add title if provided
+        if title:
+            title_clip = self.create_title_clip(title, self.DURATION)
+            if title_clip:
+                text_clips.append(title_clip)
+                print(f"Added title clip: {title}")
+        
+        # Add subtitle clips
+        for timing in timing_info:
+            print(f"Creating clip for text: {timing['word']}")
+            print(f"Start: {timing['start']}, Duration: {timing['duration']}")
+            
+            clip = self.create_text_clip(
+                timing['word'],
+                start_time=timing['start'],
+                duration=timing['duration']
+            )
+            
+            if clip:
+                text_clips.append(clip)
+                print(f"Added subtitle clip: {timing['word']}")
+            else:
+                print(f"Failed to create clip for: {timing['word']}")
+        
+        return text_clips

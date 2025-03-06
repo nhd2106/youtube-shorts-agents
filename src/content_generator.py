@@ -183,6 +183,7 @@ class ContentGenerator:
                     '.content article',
                     '.articleDetail',
                     '.content-detail',
+                    '.box-news'
                 ]
                 
                 main_content = None
@@ -433,6 +434,8 @@ class ContentGenerator:
                 self._extract_images_from_json(item, image_urls, base_url)
 
     async def _extract_content_from_url(self, url: str) -> Dict[str, Any]:
+        print(url)
+        print('-------------------------------- url ' )
         """Extract content and images from a URL"""
         try:
             # Create session with custom headers and longer timeouts
@@ -522,20 +525,26 @@ class ContentGenerator:
             
             # Try to find main content using common selectors
             content_selectors = [
-                'article.content-detail',
-                'article.fck_detail',
-                'div.fck_detail',
-                'article.article-detail',
-                'div.article-body',
-                'div.article-content',
-                'div[itemprop="articleBody"]',
-                'div.detail-content',
-                '.article__body',
-                '.article__content',
-                '.post-content',
-                '.entry-content',
-                'article.post',
-                'main article'
+                 'article.content-detail',
+                    'article.fck_detail',
+                    'div.fck_detail',
+                    'article.article-detail',
+                    'div.article-body',
+                    'div.article-content',
+                    'div[itemprop="articleBody"]',
+                    'div.detail-content',
+                    '.article__body',
+                    '.article__content',
+                    '.post-content',
+                    '.entry-content',
+                    'article.post',
+                    'main article',
+                    '[role="main"] article',
+                    '.main-content article',
+                    '.content article',
+                    '.articleDetail',
+                    '.content-detail',
+                    '.box-news'
             ]
             
             main_content = None
@@ -579,6 +588,7 @@ class ContentGenerator:
                 r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
             )
             urls = url_pattern.findall(idea)
+            print(urls)
             
             extracted_content = None
             image_urls = []
@@ -611,7 +621,7 @@ class ContentGenerator:
                     "duration": "flexible",
                     "script_length": "8-10 minutes",
                     "style": "detailed and comprehensive",
-                    "word_count": "2500 - 3000 words"
+                    "word_count": "5000 - 6000 words"
                 }
             }
 
@@ -650,6 +660,7 @@ Guidelines for content creation:
             4. Any insights, arguments, or conclusions presented by the author.
             5. Notable quotes or statements from the text.
             6. Other relevant details that contribute to understanding the content.
+            7. In case of user input has url, you need to extract detailed information from the url do not fabricate stories
             Provide a clear and concise summary of the extracted information, structured for readability.
         • Encourage the use of visuals or infographics when extracting detailed information
         • Summarize key points in bullet form for easier readability and retention
@@ -696,22 +707,22 @@ Guidelines for content creation:
     - Use analytics to identify best-performing content formats and topics
 
 Note: Exclude emojis, icons, or special characters from the script content.'''
-
+            
             # Make the API call
             print(f"Making API call with system prompt: {idea}")
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",  # or "gpt-3.5-turbo" for lower cost
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "assistant", "content": system_prompt},
                     {"role": "user", "content": f"Create a {video_format} video script about: {idea}"}
                 ],
                 temperature=0.7,
+                max_tokens=10000
             )
             
             # Get the content
             content = response.choices[0].message.content
             print("\nDebug - Raw API Response:")
-            print(content)
             
             # Parse the content
             parsed_content = self._parse_content(content, format_spec)
@@ -756,10 +767,6 @@ Note: Exclude emojis, icons, or special characters from the script content.'''
         
         # Validate content
         if not title or not script or not hashtags:
-            print("\nDebug - Parsed Content:")
-            print(f"Title: {title}")
-            print(f"Script: {script}")
-            print(f"Hashtags: {hashtags}")
             raise ValueError("Some content sections are missing")
         
         return {

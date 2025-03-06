@@ -16,6 +16,7 @@ from datetime import datetime
 import threading
 import traceback
 import sys
+from pathlib import Path
 
 app = Flask(__name__)
 CORS(app)
@@ -238,56 +239,46 @@ def get_app_data_dir() -> str:
     os.makedirs(app_data, exist_ok=True)
     return app_data
 
-def get_request_directory(request_id: str, content_type: str = None) -> str:
-    """
-    Get the directory path for a specific request and content type
-    
-    Args:
-        request_id: The unique request ID
-        content_type: Optional content type (audio, video, image, script)
-    
-    Returns:
-        Path to the request-specific directory
-    """
+def get_request_directory(request_id: str, content_type: str) -> str:
+    """Get the directory path for a specific request and content type"""
     try:
-        # Get base application data directory
-        base_path = get_app_data_dir()
-        print(f"App data directory: {base_path}")
+        # Base content directory
+        base_dir = Path("contents")
         
-        # Create contents directory in the app data directory
-        contents_dir = os.path.join(base_path, 'contents')
-        print(f"Contents directory path: {contents_dir}")
+        # Request-specific directory
+        request_dir = base_dir / request_id
         
-        # Create the full path
-        base_dir = os.path.join(contents_dir, request_id)
-        if content_type:
-            base_dir = os.path.join(base_dir, content_type)
+        # Content type directory
+        content_dir = request_dir / content_type
         
-        print(f"Creating directory at: {base_dir}")
-        # Create directory if it doesn't exist
-        os.makedirs(base_dir, exist_ok=True)
+        # Create directories with proper permissions
+        for directory in [base_dir, request_dir, content_dir]:
+            try:
+                # Create directory if it doesn't exist
+                directory.mkdir(parents=True, exist_ok=True)
+                
+                # Check write permissions
+                if not os.access(directory, os.W_OK):
+                    try:
+                        # Try to set write permissions
+                        directory.chmod(0o777)
+                    except Exception as e:
+                        print(f"Warning: Could not set permissions for {directory}: {str(e)}")
+                        
+            except Exception as e:
+                print(f"Warning: Could not create or modify directory {directory}: {str(e)}")
+                # Continue to next directory even if this one fails
+                continue
         
-        # Verify directory was created and is writable
-        if not os.path.exists(base_dir):
-            print(f"Failed to create directory: {base_dir}")
-            raise OSError(f"Failed to create directory: {base_dir}")
+        return str(content_dir)
         
-        # Test write permissions
-        test_file = os.path.join(base_dir, '.test')
-        try:
-            with open(test_file, 'w') as f:
-                f.write('test')
-            os.remove(test_file)
-            print(f"Directory is writable: {base_dir}")
-        except Exception as e:
-            print(f"Directory is not writable: {base_dir}, Error: {str(e)}")
-            raise
-            
-        return base_dir
     except Exception as e:
         print(f"Error in get_request_directory: {str(e)}")
         print(f"Stack trace: {traceback.format_exc()}")
-        raise
+        # Return a fallback directory in case of errors
+        fallback_dir = Path("contents/fallback") / content_type
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        return str(fallback_dir)
 
 @app.route('/api/download/<request_id>/<content_type>/<path:filename>')
 def download_file(request_id: str, content_type: str, filename: str) -> Any:

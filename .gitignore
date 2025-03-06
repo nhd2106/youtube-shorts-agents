@@ -9,3 +9,7 @@
 
 .DS_Store
 /build
+/src-node/node_modules
+/src-node/package-lock.json
+/src-node/contents
+/src-node/src/services/venv

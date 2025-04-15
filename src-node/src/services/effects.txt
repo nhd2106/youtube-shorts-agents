@@ -1,0 +1,53 @@
+ Top 10 Trending Video Text Effects for Subtitles
+These are popular effects used in TikTok, YouTube Shorts, and Reels:
+
+1️⃣ Pop-in Word by Word (TikTok Style)
+Effect: Each word appears one by one with a smooth pop effect.
+Styling: Bold, white text with black stroke.
+Animation: Slight scale-up when appearing.
+Example: Used in fast-paced storytelling videos.
+2️⃣ Typewriter Effect
+Effect: Text appears letter by letter, like typing.
+Styling: Monospace font, blinking cursor at the end.
+Animation: Can have a smooth fade-in per letter.
+Example: Techy, hacker-style subtitles.
+3️⃣ Bouncy Word Effect
+Effect: Words drop down with a bounce when appearing.
+Styling: Rounded font, pastel background behind text.
+Animation: Slight spring effect when landing.
+Example: Playful, vlog-style videos.
+4️⃣ Wave Motion (Kinetic Typography)
+Effect: Each word moves up and down like a wave.
+Styling: Neon or bold, colorful text.
+Animation: Smooth sine wave motion.
+Example: Music lyric videos, energetic ads.
+5️⃣ Glitchy Text
+Effect: Text distorts and flickers before stabilizing.
+Styling: Digital glitch colors (red, blue shift).
+Animation: Randomized displacement, pixelated noise.
+Example: Cyberpunk, horror, or tech-style videos.
+6️⃣ Sliding Subtitles (Horizontal Swipe)
+Effect: Words slide in from the left and fade out.
+Styling: Bold, outlined text.
+Animation: Easing motion for smooth transitions.
+Example: Captions for storytelling and motivational speeches.
+7️⃣ Shake Effect (Impactful Words)
+Effect: Some words shake aggressively for emphasis.
+Styling: Mix of normal and bold, colored words.
+Animation: Randomized shake motion.
+Example: Used in hype videos and reaction content.
+8️⃣ Expanding Words (Zoom in & Out)
+Effect: Some words start small and expand when spoken.
+Styling: Large, bold text with drop shadow.
+Animation: Smooth zoom-out effect.
+Example: Used in high-energy narration and meme edits.
+9️⃣ 3D Rotation Effect
+Effect: Words rotate slightly when appearing.
+Styling: 3D perspective look with shadows.
+Animation: Rotates in from an angle.
+Example: Sci-fi, high-tech, futuristic videos.
+🔟 Handwritten Scribble Text
+Effect: Words appear as if being hand-drawn.
+Styling: Cursive or marker-style font.
+Animation: Animated mask reveals the letters.
+Example: Used in casual, aesthetic videos.

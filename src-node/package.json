@@ -3,11 +3,51 @@
   "version": "1.0.0",
   "description": "YouTube Shorts Generator",
   "main": "dist/app.js",
+  "bin": "dist/app.js",
   "scripts": {
     "start": "node dist/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
-    "test": "jest"
+    "test": "jest",
+    "pkg": "pkg . --targets node18-macos-x64,node18-win-x64,node18-linux-x64 --output bin/youtube-shorts-agent",
+    "pkg:macos-arm": "pkg . --targets node18-macos-arm64 --output bin/youtube-shorts-agent-macos-arm64"
+  },
+  "pkg": {
+    "assets": [
+      "dist/**/*",
+      "templates/**/*",
+      "assets/**/*",
+      "node_modules/axios/dist/**/*",
+      "node_modules/@google-cloud/**/*",
+      "node_modules/googleapis/**/*",
+      "node_modules/groq-sdk/**/*",
+      "node_modules/openai/**/*",
+      "node_modules/together-ai/**/*"
+    ],
+    "outputPath": "bin",
+    "scripts": [
+      "dist/**/*.js"
+    ],
+    "targets": [
+      "node18-macos-arm64"
+    ],
+    "externals": [
+      "@ffmpeg-installer/ffmpeg",
+      "fluent-ffmpeg",
+      "sharp",
+      "node-whisper",
+      "nodejs-whisper",
+      "whisper-node",
+      "axios",
+      "@google-cloud/text-to-speech",
+      "googleapis",
+      "groq-sdk",
+      "openai",
+      "together-ai",
+      "edge-tts",
+      "@andresaya/edge-tts",
+      "microsoft-cognitiveservices-speech-sdk"
+    ]
   },
   "dependencies": {
     "@andresaya/edge-tts": "^1.2.4",
@@ -42,6 +82,7 @@
     "@types/node": "^20.11.10",
     "@types/uuid": "^9.0.8",
     "jest": "^29.7.0",
+    "pkg": "^5.8.1",
     "ts-jest": "^29.1.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"

@@ -66,14 +66,14 @@ export class ContentGenerator {
           duration: "70s",
           scriptLength: "70 - 85 seconds",
           style: "energetic and engaging",
-          wordCount: "250-300 words",
+          wordCount: "350-400 words",
         },
         normal: {
           type: "normal",
           duration: "5-7 minutes",
           scriptLength: "5-7 minutes",
           style: "detailed and comprehensive",
-          wordCount: "800-1000 words",
+          wordCount: "5000-6000 words",
         },
       };
 
@@ -86,7 +86,7 @@ export class ContentGenerator {
       }
 
       const formatSpec = formatSpecs[videoFormat as keyof typeof formatSpecs];
-
+      console.log(formatSpec, videoFormat);
       // Generate content with OpenAI
       const response = await this.client!.chat.completions.create({
         model: "gpt-4o-mini",
@@ -116,7 +116,14 @@ export class ContentGenerator {
     }
   }
 
-  private getSystemPrompt(formatSpec: any): string {
+  private getSystemPrompt(formatSpec: {
+    type: string;
+    duration: string;
+    scriptLength: string;
+    style: string;
+    wordCount: string;
+  }): string {
+    console.log(formatSpec.wordCount);
     return `You are a creative content specialist focused on creating engaging ${formatSpec.type} videos.
 You must respond in this exact format:
 TITLE: [attention-grabbing title]
@@ -154,8 +161,8 @@ Guidelines for content creation:
         • Consistently match the input language
         • don't seperate numbers by comma or dot, keep them together
         • Focus solely on the requested topic
-        • Target length: {format_spec["word_count"]} for a {format_spec["script_length"]} video
-        • Keep the tone {format_spec["style"]}
+        • Target length: ${formatSpec.duration} for a ${formatSpec.scriptLength} video
+        • Keep the tone ${formatSpec.style}
         • Maintain a consistent tone that aligns with the intended audience
         • Use storytelling techniques such as anecdotes or metaphors
         • For normal format: Include detailed examples, case studies, or real-world applications
@@ -338,6 +345,7 @@ Note: Exclude emojis, icons, or special characters from the script content and d
         ".articleDetail",
         ".content-detail",
         ".box-news",
+        ".mw-content-container",
       ];
 
       for (const selector of contentSelectors) {
@@ -368,6 +376,11 @@ Note: Exclude emojis, icons, or special characters from the script content and d
       if (!content) {
         content = `Could not extract meaningful content from ${url}. Please try a different URL or input your content manually.`;
       }
+      console.log(
+        content,
+        "--------------------- content --------------------- \n ------------------- url --------------------- \n",
+        url
+      );
 
       // Extract images
       const images: string[] = [];

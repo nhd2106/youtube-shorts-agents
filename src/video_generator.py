@@ -845,30 +845,11 @@ class VideoGenerator:
             
             client = AsyncOpenAI(api_key=api_keys['openai'])
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are a professional cinematographer creating video prompts. 
-                        Create prompts for black-forest-labs/FLUX.1-schnell-Free model. Your task is to:
-                        1. Create 9-10 if shorts format, 18-20 if normal format cinematic, photorealistic prompts
-                        2. Each prompt MUST include camera angle and cinematography techniques
-                        3. Use these essential cinematography terms in your prompts:
-                           - Camera angles: Low angle, High angle, Overhead, FPV (First Person View), Wide angle
-                           - Camera aperture: f/1.4, f/2.8, f/4, f/5.6, f/8, f/11, f/16, f/22
-                           - Camera shutter speed: 1/250, 1/500, 1/1000, 1/2000
-                           - ISO: 100, 200, 400, 800, 1600, 3200
-                           - Focal length: 10mm, 24mm, 35mm, 50mm, 85mm, 135mm, 200mm, 300mm
-                           - Shot types: Close up, Medium shot, Wide shot, Macro
-                           - Camera movement: Tracking shot, Dolly zoom, Hand held, Steady cam
-                           - Lighting: Natural lighting, Diffused lighting, Rim lighting, Lens flare
-                           - Time of day: Golden hour, Blue hour, Midday, Dusk, Sunrise, Sunset, Midnight
-                           - Weather: Overcast, Clear sky, Dramatic clouds, Rain, Snow, Fog, Wind, Lightning
-                        
-                        Example good prompts:
-                        "Low angle shot of SpaceX rocket launch, golden hour lighting, lens flare, dramatic clouds"
-                        "Wide angle tracking shot of Tesla factory, diffused industrial lighting, steady cam movement"
-                        "Close up portrait of Elon Musk, shallow depth of field, natural window lighting, office setting"
+                        "content": """
                         """
                     },
                     {

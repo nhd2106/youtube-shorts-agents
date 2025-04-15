@@ -711,7 +711,7 @@ Note: Exclude emojis, icons, or special characters from the script content.'''
             # Make the API call
             print(f"Making API call with system prompt: {idea}")
             response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",  # or "gpt-3.5-turbo" for lower cost
+                model="gpt-4o",  # or "gpt-3.5-turbo" for lower cost
                 messages=[
                     {"role": "assistant", "content": system_prompt},
                     {"role": "user", "content": f"Create a {video_format} video script about: {idea}"}

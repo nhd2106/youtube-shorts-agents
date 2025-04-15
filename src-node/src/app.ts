@@ -13,6 +13,20 @@ import { RequestStatus } from "./types";
 // Load environment variables
 config();
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+const portArg = args.find((arg) => arg.startsWith("--port="));
+const PORT = portArg
+  ? parseInt(portArg.split("=")[1], 10)
+  : process.env.PORT
+  ? parseInt(process.env.PORT, 10)
+  : 3000;
+
+// Log startup information
+console.log(`Starting YouTube Shorts Agent server on port ${PORT}`);
+console.log(`Process ID: ${process.pid}`);
+console.log(`Working directory: ${process.cwd()}`);
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -32,6 +46,11 @@ setInterval(() => {
 // Routes
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "../templates/index.html"));
+});
+
+// Add a health check endpoint
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", pid: process.pid });
 });
 
 app.get("/api/models", async (_req, res) => {
@@ -132,9 +151,9 @@ app.get("/api/status/:requestId", (req, res) => {
       estimated_time_remaining: null, // Could be implemented based on average completion times
     };
 
-    res.json(response);
+    return res.json(response);
   } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
+    return res.status(500).json({ error: (error as Error).message });
   }
 });
 
@@ -199,9 +218,9 @@ app.get("/api/download/:requestId/:contentType/:filename", (req, res) => {
       "Content-Disposition",
       `attachment; filename="${targetFilename}"`
     );
-    res.sendFile(absFilePath);
+    return res.sendFile(absFilePath);
   } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
+    return res.status(500).json({ error: (error as Error).message });
   }
 });
 
@@ -531,8 +550,7 @@ async function generateContent(
   }
 }
 
-// Start server
-const port = process.env.PORT || 5123;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
